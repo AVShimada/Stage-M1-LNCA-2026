@@ -1,4 +1,4 @@
- load C:\Users\aure6\OneDrive\Documents\MATLAB\matlab.mat
+ load %file%
 %% =========================
 % PARTIE 1 : FC
 %% =========================
