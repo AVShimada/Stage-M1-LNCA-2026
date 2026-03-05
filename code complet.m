@@ -1,4 +1,4 @@
-load C:\Users\aure6\Downloads\STAGE_M1\code\Workspace
+load "lien_fichier"
 %% =========================
 % PARTIE 1 : FC
 %% =========================
