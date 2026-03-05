@@ -1,0 +1,197 @@
+
+
+
+
+1%% ========================================================================
+%  ANALYSE MODULARITÉ FC / SC CORRIGÉE
+%% ========================================================================
+
+gamma   = 1;
+n_runs  = 100;
+tau     = 0.5;
+reps    = 50;
+
+N       = length(ages);
+N_nodes = size(SUBJECT_1.FC,1);
+
+Q_FC  = zeros(N,1);
+Q_SC  = zeros(N,1);
+
+Ci_FC = zeros(N,N_nodes);
+Ci_SC = zeros(N,N_nodes);
+
+intra_FC = zeros(N,1);
+inter_FC = zeros(N,1);
+
+intra_SC = zeros(N,1);
+inter_SC = zeros(N,1);
+
+fprintf('Calcul modularité pour %d sujets...\n',N)
+
+%% ========================================================================
+%  ANALYSE FC
+%% ========================================================================
+
+for i = 1:N
+
+    SUBJECT = eval(sprintf('SUBJECT_%d',i));
+    
+    FC = SUBJECT.FC;
+
+    % enlever diagonale
+    FC(1:N_nodes+1:end) = 0;
+
+    % supprimer corrélations négatives
+    FC(FC<0) = 0;
+
+    Ci_runs = zeros(n_runs,N_nodes);
+
+    for r = 1:n_runs
+
+        [Ci,~] = community_louvain(FC,gamma);
+
+        Ci_runs(r,:) = Ci;
+
+    end
+
+    % matrice d'accord
+    D = agreement(Ci_runs');
+
+    % consensus
+    Ci_consensus = consensus_und(D,tau,reps);
+
+    Ci_FC(i,:) = Ci_consensus;
+
+    % modularité sur partition consensus
+    Q_FC(i) = modularity_und(FC,Ci_consensus);
+
+    % calcul intra/inter
+    Ci_mat = repmat(Ci_consensus,1,N_nodes);
+
+    mask_intra = (Ci_mat == Ci_mat');
+    mask_inter = (Ci_mat ~= Ci_mat');
+
+    mask_intra(logical(eye(N_nodes))) = 0;
+    mask_inter(logical(eye(N_nodes))) = 0;
+
+    intra_FC(i) = mean(FC(mask_intra));
+    inter_FC(i) = mean(FC(mask_inter));
+
+end
+
+
+%% ========================================================================
+%  ANALYSE SC
+%% ========================================================================
+
+for i = 1:N
+
+    SUBJECT = eval(sprintf('SUBJECT_%d',i));
+    
+    SC = SUBJECT.SC;
+
+    SC(1:N_nodes+1:end) = 0;
+
+    % transformation log plus stable
+    W = log10(SC+1);
+
+    Ci_runs = zeros(n_runs,N_nodes);
+
+    for r = 1:n_runs
+
+        [Ci,~] = community_louvain(W,gamma);
+
+        Ci_runs(r,:) = Ci;
+
+    end
+
+    % matrice d'accord
+    D = agreement(Ci_runs');
+
+    % consensus
+    Ci_consensus = consensus_und(D,tau,reps);
+
+    Ci_SC(i,:) = Ci_consensus;
+
+    % modularité consensus
+    Q_SC(i) = modularity_und(W,Ci_consensus);
+
+    % intra/inter
+    Ci_mat = repmat(Ci_consensus,1,N_nodes);
+
+    mask_intra = (Ci_mat == Ci_mat');
+    mask_inter = (Ci_mat ~= Ci_mat');
+
+    mask_intra(logical(eye(N_nodes))) = 0;
+    mask_inter(logical(eye(N_nodes))) = 0;
+
+    intra_SC(i) = mean(W(mask_intra));
+    inter_SC(i) = mean(W(mask_inter));
+
+end
+
+fprintf('Analyse modularité terminée.\n')
+
+%% ========================================================================
+%  INDEX DE SÉGRÉGATION
+%% ========================================================================
+
+seg_FC = (intra_FC - inter_FC) ./ intra_FC;
+seg_SC = (intra_SC - inter_SC) ./ intra_SC;
+
+%% ========================================================================
+%  RELATION AVEC L'AGE
+%% ========================================================================
+
+figure
+
+subplot(2,2,1)
+
+scatter(ages,Q_FC,'filled')
+hold on
+mdl = fitlm(ages,Q_FC);
+plot(ages,mdl.Fitted,'r','LineWidth',2)
+
+xlabel('Age')
+ylabel('Q FC')
+title(sprintf('Modularité FC  (p=%.3f)',mdl.Coefficients.pValue(2)))
+grid on
+
+
+subplot(2,2,2)
+
+scatter(ages,Q_SC,'filled')
+hold on
+mdl = fitlm(ages,Q_SC);
+plot(ages,mdl.Fitted,'r','LineWidth',2)
+
+xlabel('Age')
+ylabel('Q SC')
+title(sprintf('Modularité SC  (p=%.3f)',mdl.Coefficients.pValue(2)))
+grid on
+
+
+subplot(2,2,3)
+
+scatter(ages,seg_FC,'filled')
+hold on
+mdl = fitlm(ages,seg_FC);
+plot(ages,mdl.Fitted,'r','LineWidth',2)
+
+xlabel('Age')
+ylabel('Segregation FC')
+title(sprintf('Segregation FC  (p=%.3f)',mdl.Coefficients.pValue(2)))
+grid on
+
+
+subplot(2,2,4)
+
+scatter(ages,seg_SC,'filled')
+hold on
+mdl = fitlm(ages,seg_SC);
+plot(ages,mdl.Fitted,'r','LineWidth',2)
+
+xlabel('Age')
+ylabel('Segregation SC')
+title(sprintf('Segregation SC  (p=%.3f)',mdl.Coefficients.pValue(2)))
+grid on
