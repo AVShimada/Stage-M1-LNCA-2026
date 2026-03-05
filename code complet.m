@@ -1,4 +1,10 @@
-load "lien_fichier"
+%CODE COMPLET STAGE
+
+%% ============
+% CODE 1
+%% ============
+
+load C:\Users\aure6\Downloads\STAGE_M1\code\Workspace
 %% =========================
 % PARTIE 1 : FC
 %% =========================
@@ -240,6 +246,10 @@ title('SC log vs âge (par quartile)');
 legend('SC Intra','SC Inter');
 grid on;
 
+%% ============
+% CODE 2
+%% ============
+
 %% ========================================================================
 %  ANALYSE DES PENTES AVEC BOOTSTRAP - RETOUR AU THÈME NATIF (SOMBRE)
 %% ========================================================================
@@ -376,6 +386,10 @@ for n = 1:N_nodes
 end
 title('Évolution des 68 nœuds SC (log, LOESS)');
 xlabel('Âge'); ylabel('Force SC (log)'); grid on;
+
+%% ===================================
+% Modularité / Allégance / Correlation
+%% ===================================
 
 %% ========================================================================
 %  PARAMÈTRES GLOBAUX
@@ -580,6 +594,10 @@ for m = 1:length(modes)
     end
 end
 
+%% ==================
+% Diagramme de Sankey
+%% ==================
+
 %% ==========================================
 % PARTIE FC : CALCUL ET EXPORT
 % ==========================================
@@ -615,3 +633,297 @@ Ci_SC_G3 = consensus_und(D3_SC, tau, reps);
 T_SC = table(Ci_SC_G1, Ci_SC_G2, Ci_SC_G3, 'VariableNames', {'G1', 'G2', 'G3'});
 writetable(T_SC, 'sankey_data_SC.csv');
 fprintf('Fichier sankey_data_SC.csv enregistré !\n');
+
+%% ========================================================================
+%  PARTITIONS MODULAIRES SUR LES MATRICES MOYENNES (PAR GROUPE)
+%% ========================================================================
+% Paramètres pour Louvain
+gamma = 1;
+n_runs = 100;
+tau = 0.5;
+reps = 50;
+
+% Initialisation des matrices de stockage pour les partitions (68 nœuds x 3 groupes)
+Ci_FC_mean_groups = zeros(N_nodes, 3);
+Ci_SC_mean_groups = zeros(N_nodes, 3);
+
+fprintf('\nCalcul des partitions sur les matrices moyennes...\n');
+
+for k = 1:3
+    fprintf('Traitement du Groupe %d...\n', k);
+    
+    % 1. Extraire les sujets du groupe et calculer la moyenne
+    idx = find(groups == k);
+    count = length(idx);
+    
+    sum_FC = zeros(N_nodes, N_nodes);
+    sum_SC = zeros(N_nodes, N_nodes);
+    
+    for i = 1:count
+        SUB = eval(sprintf('SUBJECT_%d', idx(i)));
+        sum_FC = sum_FC + SUB.FC;
+        sum_SC = sum_SC + SUB.SC;
+    end
+    
+    FC_avg = sum_FC / count;
+    SC_avg = sum_SC / count;
+    
+    % Nettoyage diagonale
+    FC_avg(1:N_nodes+1:end) = 0;
+    SC_avg(1:N_nodes+1:end) = 0;
+    W_SC_avg = log(SC_avg + 1); % Utilisation du log pour la modularité SC
+
+    % --- MODULARITÉ FC MOYENNE ---
+    Ci_runs_FC = zeros(n_runs, N_nodes);
+    for r = 1:n_runs
+        [Ci, ~] = community_louvain(FC_avg, gamma, [], 'negative_sym');
+        Ci_runs_FC(r,:) = Ci;
+    end
+    D_FC = agreement(Ci_runs_FC') / n_runs;
+    Ci_FC_mean_groups(:,k) = consensus_und(D_FC, tau, reps);
+
+    % --- MODULARITÉ SC MOYENNE ---
+    Ci_runs_SC = zeros(n_runs, N_nodes);
+    for r = 1:n_runs
+        [Ci, ~] = community_louvain(W_SC_avg, gamma);
+        Ci_runs_SC(r,:) = Ci;
+    end
+    D_SC = agreement(Ci_runs_SC') / n_runs;
+    Ci_SC_mean_groups(:,k) = consensus_und(D_SC, tau, reps);
+end
+
+%% =========================
+% VISUALISATION DES PARTITIONS
+%% =========================
+figure('Name', 'Partitions des Matrices Moyennes');
+
+% Affichage FC
+subplot(2,1,1);
+imagesc(Ci_FC_mean_groups');
+title('Partitions Modulaires : FC Moyenne par Groupe');
+set(gca, 'YTick', 1:3, 'YTickLabel', {'G1', 'G2', 'G3'});
+ylabel('Groupes d''âge'); colorbar;
+
+% Affichage SC
+subplot(2,1,2);
+imagesc(Ci_SC_mean_groups');
+title('Partitions Modulaires : SC Moyenne par Groupe');
+xlabel('Nœuds (ROI)'); 
+set(gca, 'YTick', 1:3, 'YTickLabel', {'G1', 'G2', 'G3'});
+ylabel('Groupes d''âge'); colorbar;
+
+%% =========================
+% EXPORT POUR SANKEY (Optionnel)
+%% =========================
+T_FC_mean = table(Ci_FC_mean_groups(:,1), Ci_FC_mean_groups(:,2), Ci_FC_mean_groups(:,3), ...
+    'VariableNames', {'G1', 'G2', 'G3'});
+writetable(T_FC_mean, 'sankey_data_FC_MEANS.csv');
+
+T_SC_mean = table(Ci_SC_mean_groups(:,1), Ci_SC_mean_groups(:,2), Ci_SC_mean_groups(:,3), ...
+    'VariableNames', {'G1', 'G2', 'G3'});
+writetable(T_SC_mean, 'sankey_data_SC_MEANS.csv');
+
+fprintf('Terminé ! Partitions sauvegardées dans les variables Ci_FC_mean_groups et Ci_SC_mean_groups.\n');
+
+%% ========================================================================
+%  CALCUL CLUSTERING ET EFFICIENCY (FC)
+%% ========================================================================
+C_all = zeros(N, 1);    % Clustering moyen par sujet
+E_glob = zeros(N, 1);   % Efficiency globale par sujet
+E_loc = zeros(N, 1);    % Efficiency locale par sujet
+
+thr = 0.15; % On garde le même seuil que tout à l'heure
+
+for i = 1:N
+    SUBJECT = eval(sprintf('SUBJECT_%d', i));
+    W = SUBJECT.FC;
+    W(1:N_nodes+1:end) = 0;
+    W(W < 0) = 0; % On ignore les négatifs pour ces métriques standards
+    
+    % On applique le seuil
+    W_thr = threshold_proportional(W, thr);
+    
+    % 1. Clustering Coefficient (retourne un vecteur de 68 nœuds, on prend la moyenne)
+    C_vec = clustering_coef_wu(W_thr);
+    C_all(i) = mean(C_vec);
+    
+    % 2. Global Efficiency (Scolaire, retourne une valeur unique)
+    E_glob(i) = efficiency_wei(W_thr);
+    
+    % 3. Local Efficiency (retourne un vecteur, on prend la moyenne)
+    % Le '2' indique qu'on veut l'efficience locale
+    E_loc_vec = efficiency_wei(W_thr, 2);
+    E_loc(i) = mean(E_loc_vec);
+end
+
+% Tu peux maintenant utiliser tes fonctions de graphiques (G1, G2, G3) 
+% pour voir comment E_glob et C_all varient avec l'âge.
+
+%% ========================================================================
+%  STATISTIQUES PAR GROUPE : EFFICIENCY ET CLUSTERING
+%% ========================================================================
+% Initialisation des vecteurs pour les moyennes et erreurs
+mean_E = zeros(3,1); sem_E = zeros(3,1);
+mean_C = zeros(3,1); sem_C = zeros(3,1);
+
+for k = 1:3
+    idx = (groups == k);
+    
+    % Statistiques pour l'Efficience Globale (Intégration)
+    mean_E(k) = mean(E_glob(idx));
+    sem_E(k)  = std(E_glob(idx)) / sqrt(sum(idx));
+    
+    % Statistiques pour le Clustering (Ségrégation locale)
+    mean_C(k) = mean(C_all(idx));
+    sem_C(k)  = std(C_all(idx)) / sqrt(sum(idx));
+end
+
+%% ========================================================================
+%  RECALCUL DE LA MODULARITÉ AVEC SEUIL (THRESHOLD) - 3 GROUPES
+%% ========================================================================
+
+% Paramètres de l'analyse
+threshold_value = 0.15; % On garde les 15% des connexions les plus fortes
+gamma = 1;              % Paramètre de résolution Louvain
+Q_FC_thr = zeros(N, 1);
+
+fprintf('Application du seuil (%.0f%%) et calcul de Q...\n', threshold_value*100);
+
+for i = 1:N
+    SUBJECT = eval(sprintf('SUBJECT_%d', i));
+    FC = SUBJECT.FC;
+    
+    % 1. Nettoyage de la matrice
+    FC(1:N_nodes+1:end) = 0; % Enlever diagonale
+    FC(isnan(FC)) = 0;       % Enlever NaNs
+    FC(FC < 0) = 0;          % On ne garde que les valeurs positives pour le seuillage
+    
+    % 2. Application du seuil proportionnel (BCT)
+    % Cette fonction garde les X% de liens les plus forts
+    FC_thresholded = threshold_proportional(FC, threshold_value);
+    
+    % 3. Calcul de la modularité sur la matrice seuillée
+    [~, Q_tmp] = community_louvain(FC_thresholded, gamma);
+    Q_FC_thr(i) = Q_tmp;
+end
+
+%% ========================================================================
+%  MOYENNAGE PAR GROUPE ET VISUALISATION
+%% ========================================================================
+
+mean_Q_thr = zeros(3,1);
+sem_Q_thr  = zeros(3,1); % Erreur Standard
+mean_age_groups = zeros(3,1);
+
+for k = 1:3
+    idx = (groups == k);
+    mean_Q_thr(k) = mean(Q_FC_thr(idx));
+    sem_Q_thr(k)  = std(Q_FC_thr(idx)) / sqrt(sum(idx));
+    mean_age_groups(k) = mean(ages(idx));
+end
+
+% Création du graphique
+figure('Name', 'Modularité Seuillée vs Âge', 'Color', 'k');
+hold on;
+
+% Ligne de tendance
+plot(mean_age_groups, mean_Q_thr, '--', 'Color', [0.6 0.6 0.6], 'LineWidth', 1.5);
+
+% Points avec barres d'erreur
+errorbar(mean_age_groups, mean_Q_thr, sem_Q_thr, '-o', ...
+    'LineWidth', 2.5, 'MarkerSize', 10, ...
+    'MarkerFaceColor', [0.85 0.33 0.1], 'Color', [0.85 0.33 0.1], 'CapSize', 10);
+
+grid on;
+set(gca, 'FontSize', 12, 'LineWidth', 1.2);
+xlabel('Âge moyen du groupe (ans)', 'FontSize', 14);
+ylabel(['Modularité Moyenne (Q) - Seuil ' num2str(threshold_value*100) '%'], 'FontSize', 14);
+title(['Évolution de la Modularité (FC) avec Seuil de ' num2str(threshold_value*100) '%'], 'FontSize', 16);
+
+% Ajustement des axes pour la lisibilité
+xlim([min(ages)-5, max(ages)+5]);
+
+%% ========================================================================
+%  AFFICHAGE DU GRAPHIQUE COMPARAISON
+%% ========================================================================
+figure('Name', 'Analyses Topologiques : Efficiency vs Clustering', 'Color', 'k');
+
+% --- SUBPLOT 1 : Global Efficiency (Intégration) ---
+subplot(1,2,1);
+errorbar(age_q, mean_E, sem_E, '-o', 'LineWidth', 2.5, 'MarkerSize', 8, ...
+    'MarkerFaceColor', [0.8 0.2 0.2], 'Color', [0.8 0.2 0.2], 'CapSize', 10);
+grid on;
+title('Efficience Globale (Intégration)');
+xlabel('Âge moyen du groupe');
+ylabel('Global Efficiency');
+set(gca, 'FontSize', 11);
+
+% --- SUBPLOT 2 : Clustering Coefficient (Ségrégation locale) ---
+subplot(1,2,2);
+errorbar(age_q, mean_C, sem_C, '-o', 'LineWidth', 2.5, 'MarkerSize', 8, ...
+    'MarkerFaceColor', [0.2 0.6 0.2], 'Color', [0.2 0.6 0.2], 'CapSize', 10);
+grid on;
+title('Coefficient de Clustering (Ségrégation locale)');
+xlabel('Âge moyen du groupe');
+ylabel('Mean Clustering Coefficient');
+set(gca, 'FontSize', 11);
+
+sgtitle('Évolution des propriétés du réseau avec l''âge (3 groupes)', 'FontSize', 14);
+
+%% ========================================================================
+%  ANALYSE PAR MODÈLE NUL (NULL NETWORK MODELS)
+%% ========================================================================
+n_rand = 20; % Nombre de randomisations par sujet (100 est l'idéal, mais plus lent)
+Q0_all = zeros(N, 1);
+Q_norm_all = zeros(N, 1);
+
+fprintf('Calcul des modèles nuls pour %d sujets (%d itérations chacun)...\n', N, n_rand);
+
+for i = 1:N
+    SUBJECT = eval(sprintf('SUBJECT_%d', i));
+    W = SUBJECT.FC;
+    W(1:N_nodes+1:end) = 0;
+    W(isnan(W)) = 0;
+    
+    % On utilise ici la matrice seuillée comme dans votre analyse précédente
+    W_thr = threshold_proportional(W, 0.15); 
+    
+    Q0_runs = zeros(n_rand, 1);
+    for r = 1:n_rand
+        % Génération du réseau aléatoire (Null Model)
+        % null_model_und_sign préserve les distributions de poids et de force
+        [W_null, ~] = null_model_und_sign(W_thr);
+        
+        % Calcul de la modularité du modèle nul (Q0)
+        [~, Q0_tmp] = community_louvain(W_null, gamma);
+        Q0_runs(r) = Q0_tmp;
+    end
+    
+    % Moyenne de Q0 pour le sujet i
+    Q0_all(i) = mean(Q0_runs);
+    
+    % Calcul de la modularité normalisée : (Q_obs - Q_null) / Q_null
+    % Note : Q_FC_thr(i) doit avoir été calculé au préalable
+    Q_norm_all(i) = (Q_FC_thr(i) - Q0_all(i)) / Q0_all(i);
+end
+
+%% ========================================================================
+%  MOYENNAGE ET VISUALISATION PAR GROUPE (G1, G2, G3)
+%% ========================================================================
+mean_Qnorm_groups = zeros(3,1);
+sem_Qnorm_groups  = zeros(3,1);
+
+for k = 1:3
+    idx = (groups == k);
+    mean_Qnorm_groups(k) = mean(Q_norm_all(idx));
+    sem_Qnorm_groups(k)  = std(Q_norm_all(idx)) / sqrt(sum(idx));
+end
+
+figure('Name', 'Modularité Normalisée par rapport au Modèle Nul', 'Color', 'k');
+errorbar(age_mean_groups, mean_Qnorm_groups, sem_Qnorm_groups, '-o', ...
+    'LineWidth', 2, 'MarkerSize', 10, 'MarkerFaceColor', [0.4 0.2 0.6], 'Color', [0.4 0.2 0.6]);
+
+grid on;
+xlabel('Âge moyen du groupe');
+ylabel('(Q_{obs} - Q_{null}) / Q_{null}');
+title('Évolution de la Modularité Normalisée (Excès de modularité)');
