@@ -1,4 +1,4 @@
-load C:\Users\aure6\OneDrive\Documents\MATLAB\matlab.mat
+load C:\Users\aure6\Downloads\STAGE_M1\code\Workspace
 %% =========================
 % PARTIE 1 : FC
 %% =========================
@@ -239,623 +239,346 @@ title('SC log vs âge (par quartile)');
 
 legend('SC Intra','SC Inter');
 grid on;
+
+%% ========================================================================
+%  ANALYSE DES PENTES AVEC BOOTSTRAP - RETOUR AU THÈME NATIF (SOMBRE)
+%% ========================================================================
+
 %% =========================
-% PARAMÈTRES
+% 1. PARAMÈTRES & DONNÉES
 %% =========================
 N_nodes = 68;
+n_boot  = 1000;  
+alpha   = 0.05;  
 
-strength_FC = zeros(N, N_nodes);
-strength_SC = zeros(N, N_nodes);
+% Note : N et ages doivent déjà être présents dans votre workspace
+strength_FC     = zeros(N, N_nodes);
+strength_SC_raw = zeros(N, N_nodes);
+strength_SC_log = zeros(N, N_nodes);
 
+fprintf('Calcul des forces pour %d sujets...\n', N);
 
-%% =========================
-% CALCUL DES FORCES (FC + SC LOG)
-%% =========================
 for i = 1:N
-    
     SUBJECT = eval(sprintf('SUBJECT_%d', i));
+    temp_FC = SUBJECT.FC;
+    temp_SC = SUBJECT.SC;
     
-    FC = SUBJECT.FC;
-    SC = SUBJECT.SC;
+    temp_FC(1:N_nodes+1:end) = 0;
+    temp_SC(1:N_nodes+1:end) = 0;
     
-    % enlever diagonale
-    FC(1:N_nodes+1:end) = 0;
-    SC(1:N_nodes+1:end) = 0;
-    
-    % FC classique
-    strength_FC(i,:) = sum(FC, 2);
-    
-    % SC en LOG (IMPORTANT)
-    strength_SC(i,:) = sum(log(SC + 1), 2);
-    
+    strength_FC(i,:)     = sum(temp_FC, 2);
+    strength_SC_raw(i,:) = sum(temp_SC, 2);
+    strength_SC_log(i,:) = sum(log(temp_SC + 1), 2);
 end
 
-
 %% =========================
-% RÉGRESSION PAR NŒUD
+% 2. RÉGRESSIONS ORIGINALES
 %% =========================
-slopes_FC = zeros(N_nodes,1);
-pvals_FC = zeros(N_nodes,1);
+X_orig = [ones(N,1), ages];
+b_FC_orig  = X_orig \ strength_FC;
+b_raw_orig = X_orig \ strength_SC_raw;
+b_log_orig = X_orig \ strength_SC_log;
 
-slopes_SC = zeros(N_nodes,1);
-pvals_SC = zeros(N_nodes,1);
+slopes_FC     = b_FC_orig(2,:)';
+slopes_SC_raw = b_raw_orig(2,:)';
+slopes_SC_log = b_log_orig(2,:)';
 
-for n = 1:N_nodes
+%% ==========================================
+% 3. MOTEUR BOOTSTRAP
+%% ==========================================
+boot_slopes_FC  = zeros(n_boot, N_nodes);
+boot_slopes_raw = zeros(n_boot, N_nodes);
+boot_slopes_log = zeros(n_boot, N_nodes);
+
+fprintf('Lancement du Bootstrap (%d itérations)...\n', n_boot);
+
+for b = 1:n_boot
+    idx = randi(N, [N, 1]); 
+    X_resampled = [ones(N,1), ages(idx)];
     
-    X = [ones(N,1), ages];
+    b_FC  = X_resampled \ strength_FC(idx, :);
+    b_raw = X_resampled \ strength_SC_raw(idx, :);
+    b_log = X_resampled \ strength_SC_log(idx, :);
     
-    % ===== FC =====
-    y = strength_FC(:,n);
-    
-    b = X \ y;
-    slopes_FC(n) = b(2);
-    
-    mdl = fitlm(ages, y);
-    pvals_FC(n) = mdl.Coefficients.pValue(2);
-    
-    % ===== SC (log) =====
-    y2 = strength_SC(:,n);
-    
-    b2 = X \ y2;
-    slopes_SC(n) = b2(2);
-    
-    mdl2 = fitlm(ages, y2);
-    pvals_SC(n) = mdl2.Coefficients.pValue(2);
-    
+    boot_slopes_FC(b, :)  = b_FC(2, :);
+    boot_slopes_raw(b, :) = b_raw(2, :);
+    boot_slopes_log(b, :) = b_log(2, :);
 end
 
+CI_FC  = prctile(boot_slopes_FC, [2.5, 97.5]);
+CI_raw = prctile(boot_slopes_raw, [2.5, 97.5]);
+CI_log = prctile(boot_slopes_log, [2.5, 97.5]);
 
-%% =========================
-% PLOT DES PENTES
-%% =========================
-figure;
-bar(slopes_FC);
-xlabel('Nœuds');
-ylabel('Pente');
-title('Effet de l''âge sur FC');
+err_FC  = [slopes_FC' - CI_FC(1,:);  CI_FC(2,:)  - slopes_FC'];
+err_raw = [slopes_SC_raw' - CI_raw(1,:); CI_raw(2,:) - slopes_SC_raw'];
+err_log = [slopes_SC_log' - CI_log(1,:); CI_log(2,:) - slopes_SC_log'];
+
+% Couleur pour les barres d'erreur (Gris clair pour être visible sur fond sombre)
+errCol = [0.8 0.8 0.8]; 
+
+%% ==========================================
+% 4. VISUALISATION : SC (RAW VS LOG)
+%% ==========================================
+figure('Name', 'Pentes SC : Bootstrap');
+
+% --- SC RAW ---
+subplot(2,1,1); hold on;
+sig_raw = (CI_raw(1,:) > 0 | CI_raw(2,:) < 0);
+b1 = bar(1:N_nodes, slopes_SC_raw, 'FaceColor', [0.2 0.6 0.8], 'EdgeColor', 'none');
+b1.FaceColor = 'flat';
+b1.CData(sig_raw,:) = repmat([0.8 0.2 0.2], sum(sig_raw), 1);
+errorbar(1:N_nodes, slopes_SC_raw, err_raw(1,:), err_raw(2,:), '.', 'Color', errCol, 'LineWidth', 0.5);
+title('Pentes SC Raw (Rouge = Significatif)');
+grid on; ylabel('Pente');
+
+% --- SC LOG ---
+subplot(2,1,2); hold on;
+sig_log = (CI_log(1,:) > 0 | CI_log(2,:) < 0);
+b2 = bar(1:N_nodes, slopes_SC_log, 'FaceColor', [0.8 0.5 0.2], 'EdgeColor', 'none');
+b2.FaceColor = 'flat';
+b2.CData(sig_log,:) = repmat([0.8 0.2 0.2], sum(sig_log), 1);
+errorbar(1:N_nodes, slopes_SC_log, err_log(1,:), err_log(2,:), '.', 'Color', errCol, 'LineWidth', 0.5);
+title('Pentes SC Log (Rouge = Significatif)');
+xlabel('Nœuds'); ylabel('Pente');
 grid on;
 
-figure;
-bar(slopes_SC);
-xlabel('Nœuds');
-ylabel('Pente (log)');
-title('Effet de l''âge sur SC (log)');
-grid on;
-
-
-%% =========================
-% NŒUDS SIGNIFICATIFS
-%% =========================
-alpha = 0.05;
-
-sig_nodes_FC = find(pvals_FC < alpha);
-sig_nodes_SC = find(pvals_SC < alpha);
-
-fprintf('Nœuds FC significatifs :\n');
-disp(sig_nodes_FC');
-
-fprintf('Nœuds SC significatifs :\n');
-disp(sig_nodes_SC');
-
-
-%% =========================
-% COURBES LISSÉES FC
-%% =========================
-figure;
+%% ==========================================
+% 5. VISUALISATION : FC
+%% ==========================================
+figure('Name', 'Pentes FC : Bootstrap');
 hold on;
+sig_FC = (CI_FC(1,:) > 0 | CI_FC(2,:) < 0);
+b3 = bar(1:N_nodes, slopes_FC, 'FaceColor', [0.4 0.4 0.4], 'EdgeColor', 'none');
+b3.FaceColor = 'flat';
+b3.CData(sig_FC,:) = repmat([0.8 0.2 0.2], sum(sig_FC), 1);
+errorbar(1:N_nodes, slopes_FC, err_FC(1,:), err_FC(2,:), '.', 'Color', errCol, 'LineWidth', 0.5);
+title('Pentes FC (Rouge = Significatif)');
+xlabel('Nœuds'); ylabel('Pente');
+grid on;
 
+%% =========================
+% 6. COURBES LISSÉES (LOESS)
+%% =========================
+[ages_sorted, idx_s] = sort(ages);
+
+figure('Name', 'LOESS Evolution FC'); hold on;
 for n = 1:N_nodes
-    
-    y = strength_FC(:,n);
-    
-    [ages_sorted, idx] = sort(ages);
-    y_sorted = y(idx);
-    
-    y_smooth = smooth(ages_sorted, y_sorted, 0.3, 'loess');
-    
+    y_smooth = smooth(ages_sorted, strength_FC(idx_s, n), 0.3, 'loess');
     plot(ages_sorted, y_smooth, 'LineWidth', 1);
-    
 end
-
-xlabel('Âge');
-ylabel('Force FC');
 title('Évolution des 68 nœuds FC (LOESS)');
-grid on;
+xlabel('Âge'); ylabel('Force FC'); grid on;
 
-
-%% =========================
-% COURBES LISSÉES SC (LOG)
-%% =========================
-figure;
-hold on;
-
+figure('Name', 'LOESS Evolution SC Log'); hold on;
 for n = 1:N_nodes
-    
-    y = strength_SC(:,n); % déjà en log
-    
-    [ages_sorted, idx] = sort(ages);
-    y_sorted = y(idx);
-    
-    y_smooth = smooth(ages_sorted, y_sorted, 0.3, 'loess');
-    
+    y_smooth = smooth(ages_sorted, strength_SC_log(idx_s, n), 0.3, 'loess');
     plot(ages_sorted, y_smooth, 'LineWidth', 1);
-    
 end
-
-xlabel('Âge');
-ylabel('Force SC (log)');
 title('Évolution des 68 nœuds SC (log, LOESS)');
-grid on;
-%% ================================
-% PARAMÈTRES
-% ================================
+xlabel('Âge'); ylabel('Force SC (log)'); grid on;
+
+%% ========================================================================
+%  PARAMÈTRES GLOBAUX
+%% ========================================================================
 gamma   = 1;
 n_runs  = 100;
 tau     = 0.5;
 reps    = 50;
-
 N       = length(ages);
-N_nodes = size(SUBJECT_1.FC,1);
+N_nodes = size(SUBJECT_1.FC, 1);
 
-%% ================================
-% FC
-% ================================
-Q_FC  = zeros(N,1);
-Ci_FC = zeros(N, N_nodes);
+% Initialisation des métriques de réseau
+Q_FC     = zeros(N,1);
+Ci_FC    = zeros(N, N_nodes);
+intra_FC = zeros(N, 1);
+inter_FC = zeros(N, 1);
 
+Q_SC     = zeros(N,1);
+Ci_SC    = zeros(N, N_nodes);
+intra_SC = zeros(N, 1);
+inter_SC = zeros(N, 1);
+
+%% ========================================================================
+%  ANALYSE FC : CONSENSUS + INTRA/INTER
+%% ========================================================================
+fprintf('Analyse FC pour %d sujets...\n', N);
 for i = 1:N
-    
     SUBJECT = eval(sprintf('SUBJECT_%d', i));
     FC = SUBJECT.FC;
-    FC(1:N_nodes+1:end) = 0;
-
+    FC(1:N_nodes+1:end) = 0; % Enlever diagonale
+    
     Ci_runs = zeros(n_runs, N_nodes);
-    Q_runs  = zeros(n_runs,1);
-
+    Q_runs  = zeros(n_runs, 1);
+    
     for r = 1:n_runs
         [Ci, Q] = community_louvain(FC, gamma, [], 'negative_sym');
         Ci_runs(r,:) = Ci;
         Q_runs(r) = Q;
     end
-
-    % ===== CONSENSUS (VERSION ROBUSTE) =====
-    D = agreement(Ci_runs');                 % co-classification
+    
+    % CONSENSUS
+    D = agreement(Ci_runs');
     Ci_consensus = consensus_und(D, tau, reps);
-
     Ci_FC(i,:) = Ci_consensus;
     Q_FC(i)    = mean(Q_runs);
-
-    % affichage debug
+    
+    % --- CALCUL INTRA/INTER FC ---
+    mask_intra = (Ci_consensus == Ci_consensus');
+    mask_intra(logical(eye(N_nodes))) = 0; % Retirer diagonale
+    mask_inter = ~mask_intra;
+    mask_inter(logical(eye(N_nodes))) = 0;
+    
+    intra_FC(i) = mean(FC(mask_intra));
+    inter_FC(i) = mean(FC(mask_inter));
+    
+    % Affichage debug pour le sujet 1 (Version affinée)
     if i == 1
-        figure;
-        subplot(2,1,1)
+        figure('Name', 'FC : Partitions vs Consensus');
+        
+        % Subplot 1 : Les 100 runs Louvain
+        subplot(4,1,1:3) 
         imagesc(Ci_runs)
-        title('FC - Partitions (runs)')
+        title('FC - Partitions de tous les runs')
         ylabel('Runs')
-        xlabel('Noeuds')
+        set(gca, 'XTick', []) % Cache l'axe X pour coller au plot du bas
         colorbar
-
-        subplot(2,1,2)
-        imagesc(Ci_consensus)
-        title('FC - Consensus')
-        xlabel('Noeuds')
+        
+        % Subplot 2 : Le consensus (Ligne fine)
+        subplot(4,1,4)
+        imagesc(Ci_consensus') 
+        title('FC - Partition Consensus')
+        set(gca, 'YTick', [], 'YColor', 'none') % Supprime l'aspect étiré
+        xlabel('Nœuds')
         colorbar
     end
 end
 
-%% ================================
-% SC
-% ================================
-Q_SC  = zeros(N,1);
-Ci_SC = zeros(N, N_nodes);
-
+%% ========================================================================
+%  ANALYSE SC : CONSENSUS + INTRA/INTER
+%% ========================================================================
+fprintf('Analyse SC pour %d sujets...\n', N);
 for i = 1:N
-    
     SUBJECT = eval(sprintf('SUBJECT_%d', i));
     SC = SUBJECT.SC;
     SC(1:N_nodes+1:end) = 0;
-    W = log(SC + 1);
-
+    W = log(SC + 1); % Utilisation du Log-SC pour la modularité
+    
     Ci_runs = zeros(n_runs, N_nodes);
-    Q_runs  = zeros(n_runs,1);
-
+    Q_runs  = zeros(n_runs, 1);
+    
     for r = 1:n_runs
         [Ci, Q] = community_louvain(W, gamma);
         Ci_runs(r,:) = Ci;
         Q_runs(r) = Q;
     end
-
+    
+    % CONSENSUS
     D = agreement(Ci_runs');
     Ci_consensus = consensus_und(D, tau, reps);
-
     Ci_SC(i,:) = Ci_consensus;
     Q_SC(i)    = mean(Q_runs);
-end
-
-%% ================================
-% MODULARITÉ vs ÂGE
-% ================================
-figure;
-hold on;
-scatter(ages, Q_FC, 50, 'filled');
-p = polyfit(ages, Q_FC, 1);
-xfit = linspace(min(ages), max(ages), 100);
-yfit = polyval(p, xfit);
-plot(xfit, yfit, 'LineWidth', 3);
-xlabel('Âge');
-ylabel('Modularité Q (FC)');
-title('Modularité FC vs âge');
-grid on;
-
-figure;
-hold on;
-scatter(ages, Q_SC, 50, 'filled');
-p = polyfit(ages, Q_SC, 1);
-xfit = linspace(min(ages), max(ages), 100);
-yfit = polyval(p, xfit);
-plot(xfit, yfit, 'LineWidth', 3);
-xlabel('Âge');
-ylabel('Modularité Q (SC)');
-title('Modularité SC vs âge');
-grid on;
-
-%% ================================
-% NOMBRE DE MODULES
-% ================================
-n_modules_FC = zeros(N,1);
-n_modules_SC = zeros(N,1);
-
-for i = 1:N
-    n_modules_FC(i) = length(unique(Ci_FC(i,:)));
-    n_modules_SC(i) = length(unique(Ci_SC(i,:)));
-end
-
-figure;
-scatter(ages, n_modules_FC, 50, 'filled');
-xlabel('Âge');
-ylabel('Nombre de modules (FC)');
-title('Nombre de communautés FC vs âge');
-grid on;
-
-figure;
-scatter(ages, n_modules_SC, 50, 'filled');
-xlabel('Âge');
-ylabel('Nombre de modules (SC)');
-title('Nombre de communautés SC vs âge');
-grid on;
-
-%% ================================
-% PARAMÈTRES
-% ================================
-gamma   = 1;
-n_runs  = 100;      % augmente pour probas plus stables
-N_nodes = size(SUBJECT_1.FC,1);
-
-SUBJECT = SUBJECT_1;   % choisir un sujet
-FC = SUBJECT.FC;
-FC(1:N_nodes+1:end) = 0;
-
-%% ================================
-% LOUVAIN MULTI-RUNS
-% ================================
-Ci_runs = zeros(n_runs, N_nodes);
-
-for r = 1:n_runs
-    [Ci, ~] = community_louvain(FC, gamma, [], 'negative_sym');
-    Ci_runs(r,:) = Ci;
-end
-
-%% ================================
-% MATRICE DE CO-CLASSIFICATION
-% ================================
-D = agreement(Ci_runs');     % taille = N_nodes x N_nodes
-P = D / n_runs;              % probabilité
-
-%% ================================
-% AFFICHAGE
-% ================================
-figure;
-imagesc(P);
-colorbar;
-title('Probabilité que deux régions soient dans le même module');
-xlabel('Régions');
-ylabel('Régions');
-axis square;
-
-%% ================================
-% EXTRAIRE LES PAIRES LES PLUS STABLES
-% ================================
-P_no_diag = P;
-P_no_diag(1:N_nodes+1:end) = 0;
-
-[sorted_vals, idx] = sort(P_no_diag(:), 'descend');
-
-topN = 20; % nombre de paires à afficher
-fprintf('Top %d paires les plus souvent groupées :\n', topN);
-
-for k = 1:topN
-    [i,j] = ind2sub([N_nodes N_nodes], idx(k));
-    fprintf('Région %d - Région %d : %.2f\n', i, j, sorted_vals(k));
-end
-
-%% ================================
-% DONNÉES
-% ================================
-FC = SUBJECT_1.FC;
-N  = size(FC,1);
-
-% enlever diagonale
-FC(1:N+1:end) = 0;
-
-% partition (ex : consensus)
-Ci = Ci_FC(1,:)';   % modules du sujet 1
-
-%% ================================
-% TRI ET AFFICHAGE PAR MODULE
-% ================================
-[Ci_sorted, idx] = sort(Ci);
-FC_sorted = FC(idx, idx);
-
-figure;
-imagesc(FC_sorted);
-colormap(jet);
-colorbar;
-axis square;
-title('Matrice FC réordonnée par modules');
-xlabel('Régions (triées par module)');
-ylabel('Régions (triées par module)');
-
-% Lignes de séparation entre modules
-hold on;
-modules = unique(Ci_sorted);
-pos = 0;
-for m = 1:length(modules)
-    n_m = sum(Ci_sorted == modules(m));
-    pos = pos + n_m;
-    line([pos pos],[0 N],'Color','k','LineWidth',1.5)
-    line([0 N],[pos pos],'Color','k','LineWidth',1.5)
-end
-%% ================================
-% PARAMÈTRES
-% ================================
-gamma   = 1;
-n_runs  = 100;      % augmente pour probas plus stables
-
-SUBJECT = SUBJECT_1;   % choisir un sujet
-SC = SUBJECT.SC;
-
-N_nodes = size(SC,1);
-fprintf('Nombre de régions : %d\n', N_nodes);
-
-% enlever diagonale
-SC(1:N_nodes+1:end) = 0;
-fprintf('Diagonale supprimée.\n');
-
-%% ================================
-% LOUVAIN MULTI-RUNS
-% ================================
-fprintf('Lancement Louvain (%d runs)...\n', n_runs);
-Ci_runs = zeros(n_runs, N_nodes);
-
-for r = 1:n_runs
-    [Ci, Q] = community_louvain(SC, gamma);
-    Ci_runs(r,:) = Ci;
-
-    if mod(r,10)==0
-        fprintf('  Run %d / %d terminé (Q = %.3f)\n', r, n_runs, Q);
+    
+    % --- CALCUL INTRA/INTER SC ---
+    mask_intra_s = (Ci_consensus == Ci_consensus');
+    mask_intra_s(logical(eye(N_nodes))) = 0;
+    mask_inter_s = ~mask_intra_s;
+    mask_inter_s(logical(eye(N_nodes))) = 0;
+    
+    intra_SC(i) = mean(W(mask_intra_s));
+    inter_SC(i) = mean(W(mask_inter_s));
+    
+    % Affichage debug pour le sujet 1 (Version affinée)
+    if i == 1
+        figure('Name', 'SC : Partitions vs Consensus');
+        subplot(4,1,1:3)
+        imagesc(Ci_runs)
+        title('SC (Log) - Partitions de tous les runs')
+        ylabel('Runs'); set(gca, 'XTick', []); colorbar;
+        
+        subplot(4,1,4)
+        imagesc(Ci_consensus')
+        title('SC (Log) - Partition Consensus')
+        set(gca, 'YTick', [], 'YColor', 'none')
+        xlabel('Nœuds'); colorbar;
     end
 end
-fprintf('Louvain terminé.\n');
 
-%% ================================
-% MATRICE DE CO-CLASSIFICATION
-% ================================
-fprintf('Calcul matrice de co-classification...\n');
-D = agreement(Ci_runs');     % taille = N_nodes x N_nodes
-P = D / n_runs;              % probabilité
-fprintf('Matrice de probabilité calculée.\n');
+%% ========================================================================
+%  ANALYSE DE LA SÉGRÉGATION (EFFET DE L'ÂGE)
+%% ========================================================================
+% L'index de ségrégation mesure à quel point les modules sont isolés
+seg_FC = (intra_FC - inter_FC) ./ intra_FC;
+seg_SC = (intra_SC - inter_SC) ./ intra_SC;
 
-%% ================================
-% AFFICHAGE PROBAS
-% ================================
-figure;
-imagesc(P);
-colorbar;
-title('Probabilité (SC) que deux régions soient dans le même module');
-xlabel('Régions');
-ylabel('Régions');
-axis square;
-
-%% ================================
-% EXTRAIRE LES PAIRES LES PLUS STABLES
-% ================================
-fprintf('Extraction des paires les plus stables...\n');
-
-P_no_diag = P;
-P_no_diag(1:N_nodes+1:end) = 0;
-
-[sorted_vals, idx] = sort(P_no_diag(:), 'descend');
-
-topN = 20; % nombre de paires à afficher
-fprintf('Top %d paires SC les plus souvent groupées :\n', topN);
-
-for k = 1:topN
-    [i,j] = ind2sub([N_nodes N_nodes], idx(k));
-    fprintf('Région %d - Région %d : %.2f\n', i, j, sorted_vals(k));
-end
-
-%% ================================
-% DONNÉES
-% ================================
-SC = SUBJECT_1.SC;
-N  = size(SC,1);
-
-% enlever diagonale
-SC(1:N+1:end) = 0;
-
-% partition (ex : consensus)
-Ci = Ci_SC(1,:)';   % modules du sujet 1
-fprintf('Partition SC chargée.\n');
-
-%% ================================
-% TRI PAR MODULE
-% ================================
-fprintf('Tri de la matrice SC par modules...\n');
-[Ci_sorted, idx] = sort(Ci);
-SC_sorted = SC(idx, idx);
-
-%% ================================
-% AFFICHAGE
-% ================================
-figure;
-imagesc(SC_sorted);
-colormap(jet);
-colorbar;
-axis square;
-title('Matrice SC réordonnée par modules');
-
-xlabel('Régions (triées par module)');
-ylabel('Régions (triées par module)');
-
-%% ================================
-% LIGNES DE SÉPARATION ENTRE MODULES
-% ================================
+figure('Name', 'Analyse Intra/Inter Modulaire');
+% Graphique FC
+subplot(1,2,1);
+scatter(ages, seg_FC, 'filled', 'MarkerFaceAlpha', 0.6);
 hold on;
-modules = unique(Ci_sorted);
-pos = 0;
+mdl_f = fitlm(ages, seg_FC);
+plot(ages, mdl_f.Fitted, 'r', 'LineWidth', 2);
+title(sprintf('Ségrégation FC (p=%.3f)', mdl_f.Coefficients.pValue(2)));
+xlabel('Âge'); ylabel('Index de Ségrégation'); grid on;
 
-for m = 1:length(modules)
-    n_m = sum(Ci_sorted == modules(m));
-    pos = pos + n_m;
-    line([pos pos],[0 N],'Color','k','LineWidth',1.5)
-    line([0 N],[pos pos],'Color','k','LineWidth',1.5)
-end
+% Graphique SC
+subplot(1,2,2);
+scatter(ages, seg_SC, 'filled', 'MarkerFaceColor', [0.2 0.6 0.2], 'MarkerFaceAlpha', 0.6);
+hold on;
+mdl_s = fitlm(ages, seg_SC);
+plot(ages, mdl_s.Fitted, 'r', 'LineWidth', 2);
+title(sprintf('Ségrégation SC (p=%.3f)', mdl_s.Coefficients.pValue(2)));
+xlabel('Âge'); grid on;
 
-fprintf('Affichage terminé.\n');
-%% ================================
-% PARAMÈTRES
-% ================================
-gamma   = 1;
-n_runs  = 100;
+%% ========================================================================
+%  ANALYSE MULTIMODALE (ALLÉGEANCE) SUR SUBJECT_1
+%% ========================================================================
+SUBJECT = SUBJECT_1; 
+FC = SUBJECT.FC; FC(1:N_nodes+1:end) = 0;
+SC = SUBJECT.SC; SC(1:N_nodes+1:end) = 0;
+SC_log = log(SC + 1);
 
-SUBJECT = SUBJECT_1;   % choisir un sujet
-SC = SUBJECT.SC;
+modes = {'FC', 'SC', 'Log-SC'};
+data_cell = {FC, SC, SC_log};
 
-N_nodes = size(SC,1);
-fprintf('Nombre de régions : %d\n', N_nodes);
-
-% enlever diagonale
-SC(1:N_nodes+1:end) = 0;
-fprintf('Diagonale supprimée.\n');
-
-% log sur les valeurs strictement positives
-SC_log = zeros(size(SC));
-SC_log(SC > 0) = log(SC(SC > 0));
-fprintf('Transformation log(SC) appliquée (valeurs positives uniquement).\n');
-
-%% ================================
-% LOUVAIN MULTI-RUNS
-% ================================
-fprintf('Lancement Louvain sur log(SC) (%d runs)...\n', n_runs);
-Ci_runs = zeros(n_runs, N_nodes);
-
-for r = 1:n_runs
-    [Ci, Q] = community_louvain(SC_log, gamma);
-    Ci_runs(r,:) = Ci;
-
-    if mod(r,10)==0
-        fprintf('  Run %d / %d terminé (Q = %.3f)\n', r, n_runs, Q);
+for m = 1:length(modes)
+    current_data = data_cell{m};
+    fprintf('\n--- Allégeance : %s ---\n', modes{m});
+    
+    Ci_runs = zeros(n_runs, N_nodes);
+    for r = 1:n_runs
+        if strcmp(modes{m}, 'FC')
+            [Ci, ~] = community_louvain(current_data, gamma, [], 'negative_sym');
+        else
+            [Ci, ~] = community_louvain(current_data, gamma);
+        end
+        Ci_runs(r,:) = Ci;
+    end
+    
+    P = agreement(Ci_runs') / n_runs;
+    
+    figure('Name', sprintf('Allégeance %s', modes{m}));
+    imagesc(P); colorbar; axis square;
+    title(sprintf('Probabilité de co-classification (%s)', modes{m}));
+    
+    % Tri par consensus du sujet 1
+    if strcmp(modes{m}, 'FC'), Ci_ref = Ci_FC(1,:)'; else Ci_ref = Ci_SC(1,:)'; end
+    [Ci_sorted, idx_nodes] = sort(Ci_ref);
+    Mat_sorted = current_data(idx_nodes, idx_nodes);
+    
+    figure('Name', sprintf('Matrice triée %s', modes{m}));
+    imagesc(Mat_sorted); colormap(jet); colorbar; axis square;
+    title(sprintf('Matrice %s réordonnée par modules', modes{m}));
+    
+    hold on;
+    mod_list = unique(Ci_sorted);
+    pos = 0;
+    for mod_idx = 1:length(mod_list)
+        n_m = sum(Ci_sorted == mod_list(mod_idx));
+        pos = pos + n_m;
+        line([pos pos],[0 N_nodes],'Color','k','LineWidth',1.5)
+        line([0 N_nodes],[pos pos],'Color','k','LineWidth',1.5)
     end
 end
-fprintf('Louvain terminé.\n');
-
-%% ================================
-% MATRICE DE CO-CLASSIFICATION
-% ================================
-fprintf('Calcul matrice de co-classification...\n');
-D = agreement(Ci_runs');     
-P = D / n_runs;             
-fprintf('Matrice de probabilité calculée.\n');
-
-%% ================================
-% AFFICHAGE PROBAS
-% ================================
-figure;
-imagesc(P);
-colorbar;
-title('Probabilité (log(SC)) que deux régions soient dans le même module');
-xlabel('Régions');
-ylabel('Régions');
-axis square;
-
-%% ================================
-% EXTRAIRE LES PAIRES LES PLUS STABLES
-% ================================
-fprintf('Extraction des paires les plus stables...\n');
-
-P_no_diag = P;
-P_no_diag(1:N_nodes+1:end) = 0;
-
-[sorted_vals, idx] = sort(P_no_diag(:), 'descend');
-
-topN = 20;
-fprintf('Top %d paires SC (log) les plus souvent groupées :\n', topN);
-
-for k = 1:topN
-    [i,j] = ind2sub([N_nodes N_nodes], idx(k));
-    fprintf('Région %d - Région %d : %.2f\n', i, j, sorted_vals(k));
-end
-
-%% ================================
-% DONNÉES / PARTITION
-% ================================
-SC = SUBJECT_1.SC;
-N  = size(SC,1);
-SC(1:N+1:end) = 0;
-
-% log sur les valeurs positives
-SC_log = zeros(size(SC));
-SC_log(SC > 0) = log(SC(SC > 0));
-
-% partition (premier run)
-Ci = Ci_runs(1,:)';   
-fprintf('Partition extraite du premier run.\n');
-
-%% ================================
-% TRI PAR MODULE
-% ================================
-fprintf('Tri de la matrice log(SC) par modules...\n');
-[Ci_sorted, idx] = sort(Ci);
-SC_sorted = SC_log(idx, idx);
-
-%% ================================
-% AFFICHAGE
-% ================================
-figure;
-imagesc(SC_sorted);
-colormap(jet);
-colorbar;
-axis square;
-title('Matrice log(SC) réordonnée par modules');
-
-xlabel('Régions (triées par module)');
-ylabel('Régions (triées par module)');
-
-%% ================================
-% LIGNES DE SÉPARATION ENTRE MODULES
-% ================================
-hold on;
-modules = unique(Ci_sorted);
-pos = 0;
-
-for m = 1:length(modules)
-    n_m = sum(Ci_sorted == modules(m));
-    pos = pos + n_m;
-    line([pos pos],[0 N],'Color','k','LineWidth',1.5)
-    line([0 N],[pos pos],'Color','k','LineWidth',1.5)
-end
-
-fprintf('Affichage terminé.\n');
 
 %% ==========================================
 % PARTIE FC : CALCUL ET EXPORT
