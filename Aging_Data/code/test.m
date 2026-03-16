@@ -1,4 +1,3 @@
-<<<<<<< HEAD
 %% ==========================================
 % Dynamic Functional Connectivity Pipeline
 % (with Meta-Connectivity)
@@ -208,5 +207,4 @@ xlabel('Age')
 ylabel('dFC Speed')
 
 title('Dynamic FC Speed vs Age')
->>>>>>> dafcc64fe4d50fb4fb4e3c484db0e302d09ae315
 grid on
