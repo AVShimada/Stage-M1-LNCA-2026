@@ -2,6 +2,8 @@
 
 # Comment éxecutez le code pour obtenir les différentes figures:
 
+# /!\ Changer lien du load par votre dataset /!\
+
 Lancer Code Complet -> Load le dataset output obtenu:
 - Figures directement dans matlab
 - Fichiers Csv pour obtenir les diagrammes de Sankey
