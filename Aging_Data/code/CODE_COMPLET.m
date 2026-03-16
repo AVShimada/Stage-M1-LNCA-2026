@@ -976,7 +976,7 @@ for k = 1:3
 end
 
 figure('Name', 'Modularité Normalisée par rapport au Modèle Nul', 'Color', 'k');
-errorbar(age_mean_groups, mean_Qnorm_groups, sem_Qnorm_groups, '-o', ...
+errorbar(mean_age_groups, mean_Qnorm_groups, sem_Qnorm_groups, '-o', ...
     'LineWidth', 2, 'MarkerSize', 10, 'MarkerFaceColor', [0.4 0.2 0.6], 'Color', [0.4 0.2 0.6]);
 
 grid on;
@@ -1577,46 +1577,21 @@ for k = 1:3
     fprintf('Groupe %d : %.4f\n', k, mean(all_LI(groups == k)));
 end
 
-%%-----------------------------------
-%Connectivité Fonctionnelle Dynamique
-%%-----------------------------------
+%% =========================
+% PARAMETERS
+%% =========================
 
-% dFC SPEED PAR GROUPE D'AGE
-
-mean_speed = zeros(3,1);
-sem_speed  = zeros(3,1);
-
-for k = 1:3
-    
-    idx = groups == k;
-    
-    data = speed_all(idx);
-    
-    mean_speed(k) = mean(data);
-    
-    sem_speed(k) = std(data) / sqrt(sum(idx));
-    
-end
-
-figure
-errorbar(age_q, mean_speed, sem_speed,'-o','LineWidth',2,'MarkerSize',8,'CapSize',10)
-
-xlabel('Age moyen du groupe')
-ylabel('dFC Speed')
-title('Dynamic Functional Connectivity Speed vs Age Group')
-
-grid on
+N = 49;
+window = 30;
+step = 1;
 
 %% =========================
 % GENERATION dFC STREAM
 %% =========================
 
-window = 30;
-step = 1;
-
-for Nrs = 1:49
+for i = 1:N
     
-    SUBJECT = eval(sprintf('SUBJECT_%d', Nrs));
+    SUBJECT = eval(sprintf('SUBJECT_%d', i));
     
     TS = SUBJECT.TS;
 
@@ -1624,15 +1599,19 @@ for Nrs = 1:49
 
     SUBJECT.dFCstream = dFCstream;
 
-    eval(sprintf('SUBJECT_%d = SUBJECT;', Nrs));
+    eval(sprintf('SUBJECT_%d = SUBJECT;', i));
 
 end
 
-%Calculer vitesse de reconfiguration dFC
+%% =========================
+% CALCUL VITESSE dFC
+%% =========================
 
-for Nrs = 1:49
+speed_all = zeros(N,1);
+
+for i = 1:N
     
-    SUBJECT = eval(sprintf('SUBJECT_%d', Nrs));
+    SUBJECT = eval(sprintf('SUBJECT_%d', i));
     
     dFCstream = SUBJECT.dFCstream;
     
@@ -1640,31 +1619,17 @@ for Nrs = 1:49
     
     SUBJECT.dFC_speed = typSpeed;
     SUBJECT.dFC_speeds = Speeds;
+    
+    speed_all(i) = typSpeed;
 
-    eval(sprintf('SUBJECT_%d = SUBJECT;', Nrs));
+    eval(sprintf('SUBJECT_%d = SUBJECT;', i));
 
 end
 
-%Analyse Age vs dFC
-speed_all = zeros(N,1);
+%% =========================
+% MATRICE dFC (EXEMPLE SUJET)
+%% =========================
 
-for i = 1:N
-    SUBJECT = eval(sprintf('SUBJECT_%d', i));
-    speed_all(i) = SUBJECT.dFC_speed;
-end
-
-mdl = fitlm(ages, speed_all)
-
-figure
-scatter(ages, speed_all,'filled')
-hold on
-plot(ages, mdl.Fitted,'r','LineWidth',2)
-xlabel('Age')
-ylabel('dFC Speed')
-title('Dynamic FC Speed vs Age')
-grid on
-
-%dFC Matrice
 SUBJECT = SUBJECT_1;
 
 dFCstream = SUBJECT.dFCstream;
@@ -1674,233 +1639,319 @@ dFC = dFCstream2dFC(dFCstream);
 figure
 imagesc(dFC)
 axis square
-caxis([0 1])
 colormap(turbo)
 colorbar
+caxis([0 1])
 xlabel('Temps')
 ylabel('Temps')
-title('Dynamic FC matrix')
+title('Dynamic Functional Connectivity (dFC)')
 
-%Méta connectivité
+%% ==========================================
+% FCD recurrence matrices for age groups
+%% ==========================================
+
+N = 49;     % nombre de sujets
+TR = 2;
+
+window = round(20/TR);
+step = 1;
+
+ages = zeros(N,1);
+
+FCD_all = {};
+
+%% ==========================================
+% COMPUTE FCD FOR EACH SUBJECT
+%% ==========================================
+
+for s = 1:N
+
+    SUBJECT = eval(sprintf('SUBJECT_%d',s));
+
+    TS = SUBJECT.TS;
+    ages(s) = SUBJECT.age;
+
+    %% dFC stream
+
+    dFCstream = TS2dFCstream(TS,window,step);
+
+    %% FCD matrix
+
+    FCD = dFCstream2dFC(dFCstream);
+
+    FCD_all{s} = FCD;
+
+end
+
+%% ==========================================
+% DEFINE AGE GROUPS
+%% ==========================================
+
+age_q = quantile(ages,[0 1/3 2/3 1]);
+
+group = zeros(N,1);
+
+for i = 1:N
+    
+    if ages(i) <= age_q(2)
+        group(i) = 1;
+        
+    elseif ages(i) <= age_q(3)
+        group(i) = 2;
+        
+    else
+        group(i) = 3;
+    end
+    
+end
+
+%% ==========================================
+% MEAN FCD FOR EACH GROUP
+%% ==========================================
+
+FCD_group = cell(3,1);
+
+for g = 1:3
+    
+    idx = find(group == g);
+    
+    FCD_sum = 0;
+    
+    for k = 1:length(idx)
+        
+        FCD_sum = FCD_sum + FCD_all{idx(k)};
+        
+    end
+    
+    FCD_group{g} = FCD_sum / length(idx);
+    
+end
+
+%% ==========================================
+% PLOT RECURRENCE MATRICES
+%% ==========================================
+
+figure
+
+titles = {'Young','Middle Age','Old'}
+
+for g = 1:3
+    
+    subplot(1,3,g)
+    
+    imagesc(FCD_group{g})
+    
+    axis square
+    
+    colorbar
+    
+    caxis([0 1])
+    
+    title(titles{g})
+    
+    xlabel('Time window')
+    ylabel('Time window')
+    
+end
+colormap(turbo)
+
+%% =========================
+% META CONNECTIVITY
+%% =========================
+
 MC = dFCstream2MC(dFCstream);
 
 figure
 imagesc(MC)
 axis square
-caxis([0 1])
 colormap(turbo)
 colorbar
+caxis([0 1])
 xlabel('Connexions')
 ylabel('Connexions')
 title('Meta-connectivity')
 
-%% ==========================================
-% Dynamic Functional Connectivity Pipeline
-% (with Meta-Connectivity)
-% ==========================================
+%% =========================
+% AGE vs dFC SPEED
+%% =========================
 
-%% PARAMETERS
-
-N = 49;
-TR = 2;
-
-window = round(20/TR);
-step   = 1;
-
-%% STORAGE
-
-ages       = zeros(N,1);
-speed_all  = zeros(N,1);
-corr_all   = zeros(N,1);
-
-%% ==========================================
-% MAIN LOOP
-%% ==========================================
-
-for s = 1:N
-
-    SUBJECT = eval(sprintf('SUBJECT_%d',s));
-
-    TS = SUBJECT.TS;
-    ages(s) = SUBJECT.age;
-
-    %% 1️⃣ dFC stream
-
-    dFCstream = TS2dFCstream(TS,window,step);
-
-    SUBJECT.dFCstream = dFCstream;
-
-    %% 2️⃣ dFC matrix
-
-    dFC = dFCstream2dFC(dFCstream);
-
-    SUBJECT.dFC = dFC;
-
-    %% 3️⃣ META-CONNECTIVITY
-
-    MC = dFCstream2MC(dFCstream);
-
-    SUBJECT.MC = MC;
-
-    %% 4️⃣ dFC SPEED
-
-    [typSpeed,Speeds] = dFC_Speeds(dFCstream);
-
-    SUBJECT.dFC_speed  = typSpeed;
-    SUBJECT.dFC_speeds = Speeds;
-
-    speed_all(s) = typSpeed;
-
-    %% 5️⃣ FC similarity (20 s)
-
-    lag = round(20/TR);
-
-    corr_all(s) = mean(diag(dFC,lag));
-
-    SUBJECT.FC_similarity_20s = corr_all(s);
-
-    eval(sprintf('SUBJECT_%d = SUBJECT;',s));
-
-end
-
-%% ==========================================
-% VISUALIZATION
-%% ==========================================
-
-SUBJECT = SUBJECT_1;
+mdl = fitlm(ages, speed_all);
 
 figure
-imagesc(SUBJECT.dFC)
-axis square
-colorbar
-colormap(turbo)
-
-title('Dynamic Functional Connectivity')
-
-figure
-imagesc(SUBJECT.MC)
-axis square
-colorbar
-colormap(turbo)
-
-title('Meta-Connectivity Matrix')
-
-%% AGE vs dFC SPEED
-
-mdl_speed = fitlm(ages,speed_all);
-
-figure
-scatter(ages,speed_all,70,'filled')
+scatter(ages, speed_all,60,'filled')
 hold on
-plot(ages,mdl_speed.Fitted,'r','LineWidth',2)
+plot(ages, mdl.Fitted,'r','LineWidth',2)
 
 xlabel('Age')
 ylabel('dFC Speed')
-
 title('Dynamic FC Speed vs Age')
-=======
-%% ==========================================
-% Dynamic Functional Connectivity Pipeline
-% (with Meta-Connectivity)
-% ==========================================
 
-%% PARAMETERS
-
-N = 49;
-TR = 2;
-
-window = round(20/TR);
-step   = 1;
-
-%% STORAGE
-
-ages       = zeros(N,1);
-speed_all  = zeros(N,1);
-corr_all   = zeros(N,1);
-
-%% ==========================================
-% MAIN LOOP
-%% ==========================================
-
-for s = 1:N
-
-    SUBJECT = eval(sprintf('SUBJECT_%d',s));
-
-    TS = SUBJECT.TS;
-    ages(s) = SUBJECT.age;
-
-    %% 1️⃣ dFC stream
-
-    dFCstream = TS2dFCstream(TS,window,step);
-
-    SUBJECT.dFCstream = dFCstream;
-
-    %% 2️⃣ dFC matrix
-
-    dFC = dFCstream2dFC(dFCstream);
-
-    SUBJECT.dFC = dFC;
-
-    %% 3️⃣ META-CONNECTIVITY
-
-    MC = dFCstream2MC(dFCstream);
-
-    SUBJECT.MC = MC;
-
-    %% 4️⃣ dFC SPEED
-
-    [typSpeed,Speeds] = dFC_Speeds(dFCstream);
-
-    SUBJECT.dFC_speed  = typSpeed;
-    SUBJECT.dFC_speeds = Speeds;
-
-    speed_all(s) = typSpeed;
-
-    %% 5️⃣ FC similarity (20 s)
-
-    lag = round(20/TR);
-
-    corr_all(s) = mean(diag(dFC,lag));
-
-    SUBJECT.FC_similarity_20s = corr_all(s);
-
-    eval(sprintf('SUBJECT_%d = SUBJECT;',s));
-
-end
-
-%% ==========================================
-% VISUALIZATION
-%% ==========================================
-
-SUBJECT = SUBJECT_1;
-
-figure
-imagesc(SUBJECT.dFC)
-axis square
-colorbar
-colormap(turbo)
-
-title('Dynamic Functional Connectivity')
-
-figure
-imagesc(SUBJECT.MC)
-axis square
-colorbar
-colormap(turbo)
-
-title('Meta-Connectivity Matrix')
-
-%% AGE vs dFC SPEED
-
-mdl_speed = fitlm(ages,speed_all);
-
-figure
-scatter(ages,speed_all,70,'filled')
-hold on
-plot(ages,mdl_speed.Fitted,'r','LineWidth',2)
-
-xlabel('Age')
-ylabel('dFC Speed')
-
-title('Dynamic FC Speed vs Age')
 grid on
+
+%% =========================
+% VITESSE PAR GROUPE D'AGE
+%% =========================
+
+mean_speed = zeros(3,1);
+sem_speed = zeros(3,1);
+
+for k = 1:3
+    
+    idx = groups == k;
+    
+    data = speed_all(idx);
+    
+    mean_speed(k) = mean(data);
+    
+    sem_speed(k) = std(data)/sqrt(sum(idx));
+    
+end
+
+figure
+errorbar(1:3, mean_speed, sem_speed,'-o','LineWidth',2,'MarkerSize',8)
+
+xticks([1 2 3])
+xticklabels({'Young','Middle','Old'})
+
+xlabel('Age group')
+ylabel('dFC Speed')
+
+title('dFC Speed by Age Group')
+
+grid on
+%% =========================
+% CALCUL K-CORE DYNAMIQUE
+%% =========================
+
+SUBJECT = SUBJECT_1;
+
+dFCstream = SUBJECT.dFCstream;
+
+% dimensions
+nEdges = size(dFCstream,1);
+T = size(dFCstream,2);
+
+% retrouver nombre de ROI
+nROI = round((1 + sqrt(1 + 8*nEdges))/2);
+
+threshold = 0.3;
+
+kcore_time = zeros(nROI,T);
+
+%% =========================
+% CALCUL K-CORE POUR CHAQUE TEMPS
+%% =========================
+
+for t = 1:T
+    
+    % vecteur des connexions
+    vec = dFCstream(:,t);
+    
+    % reconstruire matrice FC
+    FC = zeros(nROI);
+    
+    ind = triu(true(nROI),1);
+    FC(ind) = vec;
+    
+    % symétriser
+    FC = FC + FC';
+    
+    % matrice d'adjacence binaire
+    A = FC > threshold;
+    
+    % supprimer diagonale
+    A(1:nROI+1:end) = 0;
+    
+    % coreness des noeuds
+    kcore = kcoreness_centrality_bu(A);
+    
+    kcore_time(:,t) = kcore;
+
+end
+
+
+%% =========================
+% FIGURE 1 : K-CORE DANS LE TEMPS
+%% =========================
+
+figure
+
+imagesc(kcore_time)
+
+colormap(turbo)
+colorbar
+
+xlabel('Time window')
+ylabel('ROI')
+
+title('Dynamic k-core structure')
+
+
+%% =========================
+% FIGURE 2 : FORCE DU COEUR DU RESEAU
+%% =========================
+
+max_kcore = max(kcore_time);
+
+figure
+
+plot(max_kcore,'LineWidth',2)
+
+xlabel('Time window')
+ylabel('Max k-core')
+
+title('Network core strength over time')
+
+grid on
+
+
+%% =========================
+% FIGURE 3 : ROI DANS LE COEUR DU RESEAU
+%% =========================
+
+core_nodes = zeros(size(kcore_time));
+
+for t = 1:T
+    core_nodes(:,t) = kcore_time(:,t) >= max(kcore_time(:,t)) - 1;
+end
+
+figure
+
+imagesc(core_nodes)
+
+colormap(gray)
+colorbar
+
+xlabel('Time window')
+ylabel('ROI')
+
+title('Nodes belonging to network core')
+
+
+%% =========================
+% FIGURE 4 : EXEMPLE MATRICE FC
+%% =========================
+
+t = round(T/2);
+
+vec = dFCstream(:,t);
+
+FC = zeros(nROI);
+
+ind = triu(true(nROI),1);
+FC(ind) = vec;
+
+FC = FC + FC';
+
+figure
+
+imagesc(FC)
+
+axis square
+colormap(turbo)
+colorbar
+
+xlabel('ROI')
+ylabel('ROI')
+
+title('Functional connectivity matrix (example)')
