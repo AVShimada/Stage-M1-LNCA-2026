@@ -1,7 +1,4 @@
-# Stage-M1-LNCA-2026
-
 # Comment éxecutez le code pour obtenir les différentes figures:
-
 # /!\ Changer lien du load par votre dataset /!\
 
 Lancer Code Complet -> Load le dataset output obtenu:

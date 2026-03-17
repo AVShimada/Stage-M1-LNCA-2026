@@ -387,7 +387,7 @@ title('Évolution des 68 nœuds SC (log, LOESS)');
 xlabel('Âge'); ylabel('Force SC (log)'); grid on;
 
 %% ===================================
-% Modularité / Allégance / Correlation
+% Modularité / Allégeance / Correlation
 %% ===================================
 
 %% ========================================================================
@@ -1876,11 +1876,13 @@ grid on
 core_nodes = zeros(size(kcore_time));
 
 for t = 1:T
-    core_nodes(:,t) = kcore_time(:,t) >= max(kcore_time(:,t)) - 1;
+    
+    thresh = prctile(kcore_time(:,t), 90); % top 10%
+    core_nodes(:,t) = kcore_time(:,t) >= thresh;
+    
 end
 
 figure
-
 imagesc(core_nodes)
 
 colormap(gray)
@@ -1889,11 +1891,10 @@ colorbar
 xlabel('Time window')
 ylabel('ROI')
 
-title('Nodes belonging to network core')
-
+title('Nodes belonging to network core (top 10%)')
 
 %% =========================
-% FIGURE 4 : EXEMPLE MATRICE FC
+% FIGURE 4 : MATRICE FC TRIÉE (SANS SEUILLAGE)
 %% =========================
 
 t = round(T/2);
@@ -1907,15 +1908,47 @@ FC(ind) = vec;
 
 FC = FC + FC';
 
+% =========================
+% COMMUNAUTÉS (SUR MATRICE COMPLÈTE)
+% =========================
+[Ci, ~] = community_louvain(FC, gamma, [], 'negative_sym');
+
+% =========================
+% TRI DES NOEUDS
+% =========================
+[Ci_sorted, idx] = sort(Ci);
+FC_sorted = FC(idx, idx);
+
+% =========================
+% AFFICHAGE
+% =========================
 figure
 
-imagesc(FC)
+imagesc(FC_sorted)
 
 axis square
 colormap(turbo)
 colorbar
 
-xlabel('ROI')
-ylabel('ROI')
+xlabel('ROI (sorted)')
+ylabel('ROI (sorted)')
 
-title('Functional connectivity matrix (example)')
+title('Functional connectivity matrix (sorted, no threshold)')
+
+% =========================
+% FRONTIÈRES DES MODULES
+% =========================
+hold on
+
+modules = unique(Ci_sorted);
+pos = 0;
+
+for i = 1:length(modules)
+    
+    n = sum(Ci_sorted == modules(i));
+    pos = pos + n;
+    
+    line([pos pos], [0 nROI], 'Color', 'k', 'LineWidth', 1.5)
+    line([0 nROI], [pos pos], 'Color', 'k', 'LineWidth', 1.5)
+    
+end
