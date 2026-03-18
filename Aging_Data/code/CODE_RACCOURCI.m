@@ -1952,3 +1952,192 @@ for i = 1:length(modules)
     line([0 nROI], [pos pos], 'Color', 'k', 'LineWidth', 1.5)
     
 end
+
+%% ========================================================================
+%  DFC ANALYSIS : EMPIRICAL vs SURROGATES (PHASE RAND + SHUFFLED)
+%% ========================================================================
+
+TS = SUBJECT.TS; % [T x N]
+[T, N] = size(TS);
+
+TR = 2; % ⚠️ à adapter
+step = 1;
+
+%% =========================
+% 1. SURROGATES
+%% =========================
+
+% --- Phase Randomization ---
+TS_pr = zeros(T, N);
+
+for i = 1:N
+    x = TS(:,i);
+    X = fft(x);
+    
+    mag = abs(X);
+    phase = angle(X);
+    
+    rand_phase = phase;
+    rand_phase(2:floor(T/2)) = rand_phase(2:floor(T/2)) + 2*pi*rand(floor(T/2)-1,1);
+    rand_phase(end-floor(T/2)+2:end) = -flip(rand_phase(2:floor(T/2)));
+    
+    X_new = mag .* exp(1i * rand_phase);
+    TS_pr(:,i) = real(ifft(X_new));
+end
+
+% --- Time Shuffling ---
+TS_sh = zeros(T, N);
+
+for i = 1:N
+    TS_sh(:,i) = TS(randperm(T), i);
+end
+
+%% =========================
+% 2. WINDOW RANGES
+%% =========================
+
+win_long = round([60 210] / TR);
+win_mid  = round([15 60] / TR);
+
+%% =========================
+% 3. INITIALISATION
+%% =========================
+
+all_speeds = struct();
+
+types = {'emp','pr','sh'};
+TS_all = {TS, TS_pr, TS_sh};
+
+%% =========================
+% 4. PIPELINE DFC + SPEED
+%% =========================
+
+for i = 1:3
+    
+    current_TS = TS_all{i};
+    
+    fprintf('\nProcessing %s...\n', types{i});
+    
+    speeds_long = [];
+    speeds_mid  = [];
+    
+    % ===== LONG WINDOWS =====
+    for w = win_long(1):10:win_long(2)
+        
+        n_win = floor((T - w)/step) + 1;
+        dFC = zeros(N*(N-1)/2, n_win);
+        
+        for k = 1:n_win
+            idx = (k-1)*step + (1:w);
+            FC = corr(current_TS(idx,:));
+            
+            ind = triu(true(N),1);
+            dFC(:,k) = FC(ind);
+        end
+        
+        % --- SPEED ---
+        for t = 1:n_win-1
+            c = corr(dFC(:,t), dFC(:,t+1));
+            speeds_long(end+1) = 1 - c;
+        end
+        
+    end
+    
+    % ===== MID WINDOWS =====
+    for w = win_mid(1):5:win_mid(2)
+        
+        n_win = floor((T - w)/step) + 1;
+        dFC = zeros(N*(N-1)/2, n_win);
+        
+        for k = 1:n_win
+            idx = (k-1)*step + (1:w);
+            FC = corr(current_TS(idx,:));
+            
+            ind = triu(true(N),1);
+            dFC(:,k) = FC(ind);
+        end
+        
+        % --- SPEED ---
+        for t = 1:n_win-1
+            c = corr(dFC(:,t), dFC(:,t+1));
+            speeds_mid(end+1) = 1 - c;
+        end
+        
+    end
+    
+    all_speeds.(types{i}).long = speeds_long;
+    all_speeds.(types{i}).mid  = speeds_mid;
+    
+end
+
+%% =========================
+% 5. KDE PLOTS
+%% =========================
+
+figure
+
+% ===== LONG WINDOWS =====
+subplot(2,1,1)
+hold on
+
+[f,x] = ksdensity(all_speeds.emp.long);
+plot(x,f,'b','LineWidth',2)
+
+[f,x] = ksdensity(all_speeds.pr.long);
+plot(x,f,'g--','LineWidth',2)
+
+[f,x] = ksdensity(all_speeds.sh.long);
+plot(x,f,'r:','LineWidth',2)
+
+title('dFC speed distribution (60–210 s)')
+xlabel('dFC speed')
+ylabel('Density')
+
+legend('Empirical','Phase randomized','Shuffled')
+
+% ===== MID WINDOWS =====
+subplot(2,1,2)
+hold on
+
+[f,x] = ksdensity(all_speeds.emp.mid);
+plot(x,f,'b','LineWidth',2)
+
+[f,x] = ksdensity(all_speeds.pr.mid);
+plot(x,f,'g--','LineWidth',2)
+
+[f,x] = ksdensity(all_speeds.sh.mid);
+plot(x,f,'r:','LineWidth',2)
+
+title('dFC speed distribution (15–60 s)')
+xlabel('dFC speed')
+ylabel('Density')
+
+legend('Empirical','Phase randomized','Shuffled')
+
+%% =========================
+% 6. TEST STATISTIQUE (KS)
+%% =========================
+
+fprintf('\n===== KS TESTS =====\n')
+
+[h,p] = kstest2(all_speeds.emp.long, all_speeds.pr.long);
+fprintf('Emp vs Phase (long): p = %.10e\n', p);
+
+[h,p] = kstest2(all_speeds.emp.long, all_speeds.sh.long);
+fprintf('Emp vs Shuffled (long): p = %.10e\n', p);
+
+[h,p] = kstest2(all_speeds.emp.mid, all_speeds.pr.mid);
+fprintf('Emp vs Phase (mid): p = %.10e\n', p);
+
+[h,p] = kstest2(all_speeds.emp.mid, all_speeds.sh.mid);
+fprintf('Emp vs Shuffled (mid): p = %.10e\n', p);
+
+fprintf('\n===== MEAN SPEEDS =====\n')
+
+fprintf('Emp long: %.4f\n', mean(all_speeds.emp.long));
+fprintf('Phase long: %.4f\n', mean(all_speeds.pr.long));
+fprintf('Shuffled long: %.4f\n\n', mean(all_speeds.sh.long));
+
+fprintf('Emp mid: %.4f\n', mean(all_speeds.emp.mid));
+fprintf('Phase mid: %.4f\n', mean(all_speeds.pr.mid));
+fprintf('Shuffled mid: %.4f\n', mean(all_speeds.sh.mid));
