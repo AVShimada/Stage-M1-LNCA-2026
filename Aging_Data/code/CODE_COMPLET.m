@@ -1755,6 +1755,59 @@ for g = 1:3
 end
 colormap(turbo)
 
+%% ========================================================================
+%  ANALYSE DE LA MÉTA-CONNECTIVITÉ PAR GROUPE D'ÂGE
+%% ========================================================================
+
+% Initialisation des noms de groupes pour les titres
+group_names = {'Jeunes (G1)', 'Moyens (G2)', 'Seniors (G3)'};
+figure('Name', 'Comparaison de la Méta-Connectivité par Groupe', 'Color', 'k', 'Units', 'normalized', 'Position', [0.05 0.2 0.9 0.5]);
+
+for k = 1:3
+    % 1. Identification des sujets du groupe k
+    idx_group = find(groups == k);
+    n_subs = length(idx_group);
+    
+    % Initialisation de la matrice MC moyenne pour le groupe
+    % On récupère la taille d'une MC type (2278 x 2278 pour 68 ROIs)
+    SUB_temp = eval(sprintf('SUBJECT_%d', idx_group(1)));
+    MC_example = dFCstream2MC(SUB_temp.dFCstream);
+    [dim_mc, ~] = size(MC_example);
+    
+    MC_group_sum = zeros(dim_mc, dim_mc);
+    
+    fprintf('Calcul de la Méta-Connectivité pour le Groupe %d (%d sujets)...\n', k, n_subs);
+    
+    % 2. Boucle sur les sujets du groupe
+    for i = 1:n_subs
+        SUB = eval(sprintf('SUBJECT_%d', idx_group(i)));
+        
+        % Calcul de la MC individuelle
+        MC_sub = dFCstream2MC(SUB.dFCstream);
+        
+        % Accumulation (on somme pour faire la moyenne plus tard)
+        MC_group_sum = MC_group_sum + MC_sub;
+    end
+    
+    % 3. Calcul de la moyenne du groupe
+    MC_group_avg = MC_group_sum / n_subs;
+    
+    % 4. Affichage (Subplot pour comparer les 3 groupes)
+    subplot(1, 3, k);
+    imagesc(MC_group_avg);
+    axis square;
+    colormap(turbo);
+    colorbar;
+    caxis([0 0.5]); % Ajusté car la moyenne est souvent plus basse que 1
+    
+    set(gca, 'Color', 'k', 'XColor', 'w', 'YColor', 'w', 'FontSize', 9);
+    xlabel('Connexions', 'Color', 'w');
+    ylabel('Connexions', 'Color', 'w');
+    title(group_names{k}, 'Color', 'w', 'FontSize', 12);
+end
+
+sgtitle('Évolution de la Méta-Connectivité avec l''âge', 'Color', 'w', 'FontSize', 16);
+
 %% =========================
 % META CONNECTIVITY
 %% =========================
@@ -2316,3 +2369,85 @@ for r = 1:2
     legend([p1 p2 p3], 'Location', 'northeast', 'Box', 'off');
     grid on; xlim([0 1.2]);
 end
+
+%% ========================================================================
+%  ANALYSE DES TRIMERS (HIGH-ORDER ORGANIZATION) - MÉTHODE ARBABYAZD
+%% ========================================================================
+
+N_nodes = 68;
+N_subjects = 49;
+trimer_strength_all = zeros(N_subjects, 1);
+
+% 1. Création de la table de correspondance (Mapping Arêtes -> Index MC)
+% On suit l'ordre du triu(true(N_nodes), 1) utilisé dans dFCstream
+[row_idx, col_idx] = find(triu(true(N_nodes), 1));
+n_edges = length(row_idx); % Doit être 2278
+
+% Matrice pour retrouver l'index de l'arête (i,j) rapidement
+edge_map = zeros(N_nodes, N_nodes);
+for e = 1:n_edges
+    edge_map(row_idx(e), col_idx(e)) = e;
+    edge_map(col_idx(e), row_idx(e)) = e;
+end
+
+fprintf('Calcul des Trimers pour %d sujets...\n', N_subjects);
+
+for s = 1:N_subjects
+    SUBJECT = eval(sprintf('SUBJECT_%d', s));
+    
+    % Calcul de la MC individuelle
+    MC_sub = dFCstream2MC(SUBJECT.dFCstream);
+    
+    % On ne s'intéresse qu'aux triplets de régions (i, j, k)
+    % Nombre de triplets possibles : 68*67*66 / 6 = 50 116
+    t_strengths = [];
+    
+    % On boucle sur tous les triangles possibles
+    for i = 1:N_nodes
+        for j = i+1:N_nodes
+            for k = j+1:N_nodes
+                
+                % Récupérer les indices des 3 arêtes formant le triangle
+                e1 = edge_map(i, j);
+                e2 = edge_map(j, k);
+                e3 = edge_map(i, k);
+                
+                % Trimer Strength = Moyenne des corrélations entre ces arêtes
+                % Formule tirée d'Arbabyazd et al. (2023)
+                t_val = (MC_sub(e1, e2) + MC_sub(e2, e3) + MC_sub(e1, e3)) / 3;
+                t_strengths(end+1) = t_val;
+            end
+        end
+    end
+    
+    % Force moyenne des trimers pour le sujet
+    trimer_strength_all(s) = mean(t_strengths);
+    
+    if mod(s,10) == 0, fprintf('Sujet %d/49 terminé\n', s); end
+end
+
+%% ========================================================================
+%  STATISTIQUES ET VISUALISATION PAR GROUPE
+%% ========================================================================
+
+mean_trimer = zeros(3,1);
+sem_trimer = zeros(3,1);
+
+for k = 1:3
+    idx = (groups == k); % Utilise tes groupes G1, G2, G3
+    mean_trimer(k) = mean(trimer_strength_all(idx));
+    sem_trimer(k)  = std(trimer_strength_all(idx)) / sqrt(sum(idx));
+end
+
+figure('Name', 'Trimer Strength vs Age', 'Color', 'k');
+errorbar(1:3, mean_trimer, sem_trimer, '-s', 'LineWidth', 2, ...
+    'MarkerSize', 10, 'MarkerFaceColor', 'b', 'CapSize', 10);
+
+set(gca, 'XTick', 1:3, 'XTickLabel', {'Young (G1)', 'Middle (G2)', 'Old (G3)'});
+ylabel('Global Trimer Strength (tMC)');
+title('Évolution de l''organisation d''ordre supérieur avec l''âge');
+grid on;
+
+% Test de corrélation global
+[r_trim, p_trim] = corr(ages, trimer_strength_all);
+fprintf('\nRésultat : r = %.3f, p = %.4f\n', r_trim, p_trim);
