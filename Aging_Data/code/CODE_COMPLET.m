@@ -2451,3 +2451,255 @@ grid on;
 % Test de corrélation global
 [r_trim, p_trim] = corr(ages, trimer_strength_all);
 fprintf('\nRésultat : r = %.3f, p = %.4f\n', r_trim, p_trim);
+
+%% ========================================================================
+%  FIGURE 6 RIGHT PANEL (PAR ROI)
+%  Dimers / Trimers par région
+%% ========================================================================
+
+fprintf('\n===== REGIONAL DIMERS / TRIMERS =====\n')
+
+% --- INIT ---
+SUBJECT = SUBJECT_1;
+dFCstream = SUBJECT.dFCstream;
+
+nEdges = size(dFCstream,1);
+nROI = round((1 + sqrt(1 + 8*nEdges))/2);
+
+[ind_i, ind_j] = find(triu(ones(nROI),1));
+edges = [ind_i ind_j];
+
+% stockage
+dimer_roi   = zeros(N, nROI);
+trimer_roi  = zeros(N, nROI);
+
+%% =========================
+% LOOP SUJETS
+%% =========================
+
+for s = 1:N
+    
+    SUBJECT = eval(sprintf('SUBJECT_%d',s));
+    dFCstream = SUBJECT.dFCstream;
+    
+    % --- DIMERS PAR ROI ---
+    dimer_tmp = zeros(nROI,1);
+    count_d = zeros(nROI,1);
+    
+    for e = 1:nEdges
+        
+        i = edges(e,1);
+        j = edges(e,2);
+        
+        val = mean(abs(dFCstream(e,:)));
+        
+        dimer_tmp(i) = dimer_tmp(i) + val;
+        dimer_tmp(j) = dimer_tmp(j) + val;
+        
+        count_d(i) = count_d(i) + 1;
+        count_d(j) = count_d(j) + 1;
+        
+    end
+    
+    dimer_roi(s,:) = (dimer_tmp ./ count_d)';
+    
+    % --- MC ---
+    MC = dFCstream2MC(dFCstream);
+    
+    % --- TRIMERS PAR ROI ---
+    trimer_tmp = zeros(nROI,1);
+    count_t = zeros(nROI,1);
+    
+    for e1 = 1:nEdges
+        
+        i = edges(e1,1);
+        j = edges(e1,2);
+        
+        for e2 = e1+1:nEdges
+            
+            k = edges(e2,1);
+            l = edges(e2,2);
+            
+            % partage un noeud → TRIMER
+            shared_nodes = intersect([i j],[k l]);
+            
+            if ~isempty(shared_nodes)
+                
+                val = abs(MC(e1,e2));
+                
+                % contribution au noeud racine
+                for node = shared_nodes
+                    
+                    trimer_tmp(node) = trimer_tmp(node) + val;
+                    count_t(node) = count_t(node) + 1;
+                    
+                end
+                
+            end
+            
+        end
+    end
+    
+    trimer_roi(s,:) = (trimer_tmp ./ count_t)';
+    
+    if mod(s,10)==0
+        fprintf('Subject %d/%d done\n', s, N);
+    end
+    
+end
+
+%% =========================
+% MOYENNE PAR GROUPE
+%% =========================
+
+dimer_group  = zeros(3,nROI);
+trimer_group = zeros(3,nROI);
+
+for g = 1:3
+    
+    idx = group == g;
+    
+    dimer_group(g,:)  = mean(dimer_roi(idx,:),1);
+    trimer_group(g,:) = mean(trimer_roi(idx,:),1);
+    
+end
+
+%% =========================
+% PLOT (STYLE FIGURE 6)
+%% =========================
+
+figure
+
+% ----- DIMERS -----
+subplot(1,2,1)
+hold on
+
+plot(dimer_group(1,:), 'LineWidth',2)
+plot(dimer_group(2,:), 'LineWidth',2)
+plot(dimer_group(3,:), 'LineWidth',2)
+
+xlabel('ROI')
+ylabel('Dimer strength')
+
+title('Dimers (par région)')
+
+legend('Young','Middle','Old')
+grid on
+
+% ----- TRIMERS -----
+subplot(1,2,2)
+hold on
+
+plot(trimer_group(1,:), 'LineWidth',2)
+plot(trimer_group(2,:), 'LineWidth',2)
+plot(trimer_group(3,:), 'LineWidth',2)
+
+xlabel('ROI')
+ylabel('Trimer strength')
+
+title('Trimers (par région)')
+
+legend('Young','Middle','Old')
+grid on
+
+colormap(turbo)
+
+%% ========================================================================
+%  META-HUBS ONLY (BASED ON TRIMERS)
+%% ========================================================================
+
+fprintf('\n===== SELECTING META-HUBS =====\n')
+
+% --- importance moyenne des ROI (basée sur trimers) ---
+trimer_importance = mean(trimer_group,1);
+
+% --- seuil (top 20%) ---
+threshold = prctile(trimer_importance, 80);
+
+meta_hubs = find(trimer_importance >= threshold);
+
+fprintf('Number of meta-hubs: %d / %d\n', length(meta_hubs), nROI)
+
+%% =========================
+% NORMALISATION
+%% =========================
+
+dimer_norm = dimer_group ./ dimer_group(1,:);
+trimer_norm = trimer_group ./ trimer_group(1,:);
+
+%% =========================
+% SUBPLOTS (SEULEMENT META-HUBS)
+%% =========================
+
+nHubs = length(meta_hubs);
+
+ncols = ceil(sqrt(nHubs));
+nrows = ceil(nHubs / ncols);
+
+%% =========================
+% DIMERS META-HUBS
+%% =========================
+
+figure('Name','Dimers (Meta-hubs)','Color','k')
+
+for idx = 1:nHubs
+    
+    r = meta_hubs(idx);
+    
+    subplot(nrows, ncols, idx)
+    
+    vals = dimer_norm(:,r);
+    vals(isnan(vals)) = 0;
+    
+    b = bar(vals);
+    b.FaceColor = 'flat';
+    
+    % couleurs
+    b.CData(1,:) = [0 0.45 0.74];
+    b.CData(2,:) = [0.85 0.33 0.10];
+    b.CData(3,:) = [0.64 0.08 0.18];
+    
+    xticks([1 2 3])
+    xticklabels({'G1','G2','G3'})
+    
+    title(sprintf('ROI %d', r))
+    ylim([0 max(dimer_norm(:))*1.2])
+    
+end
+
+sgtitle('Dimers (Meta-hubs only)')
+
+%% =========================
+% TRIMERS META-HUBS
+%% =========================
+
+figure('Name','Trimers (Meta-hubs)','Color','k')
+
+for idx = 1:nHubs
+    
+    r = meta_hubs(idx);
+    
+    subplot(nrows, ncols, idx)
+    
+    vals = trimer_norm(:,r);
+    vals(isnan(vals)) = 0;
+    
+    b = bar(vals);
+    b.FaceColor = 'flat';
+    
+    % couleurs
+    b.CData(1,:) = [0 0.45 0.74];
+    b.CData(2,:) = [0.85 0.33 0.10];
+    b.CData(3,:) = [0.64 0.08 0.18];
+    
+    xticks([1 2 3])
+    xticklabels({'G1','G2','G3'})
+    
+    title(sprintf('ROI %d', r))
+    ylim([0 max(trimer_norm(:))*1.2])
+    
+end
+
+sgtitle('Trimers (Meta-hubs only)')
+
+fprintf('\n===== DONE =====\n')

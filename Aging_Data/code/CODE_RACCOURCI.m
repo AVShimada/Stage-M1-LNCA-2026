@@ -2227,3 +2227,103 @@ for r = 1:2
     legend([p1 p2 p3], 'Location', 'northeast', 'Box', 'off');
     grid on; xlim([0 1.2]);
 end
+
+%% ========================================================================
+%  META-HUBS ONLY (BASED ON TRIMERS)
+%% ========================================================================
+
+fprintf('\n===== SELECTING META-HUBS =====\n')
+
+% --- importance moyenne des ROI (basée sur trimers) ---
+trimer_importance = mean(trimer_group,1);
+
+% --- seuil (top 20%) ---
+threshold = prctile(trimer_importance, 80);
+
+meta_hubs = find(trimer_importance >= threshold);
+
+fprintf('Number of meta-hubs: %d / %d\n', length(meta_hubs), nROI)
+
+%% =========================
+% NORMALISATION
+%% =========================
+
+dimer_norm = dimer_group ./ dimer_group(1,:);
+trimer_norm = trimer_group ./ trimer_group(1,:);
+
+%% =========================
+% SUBPLOTS (SEULEMENT META-HUBS)
+%% =========================
+
+nHubs = length(meta_hubs);
+
+ncols = ceil(sqrt(nHubs));
+nrows = ceil(nHubs / ncols);
+
+%% =========================
+% DIMERS META-HUBS
+%% =========================
+
+figure('Name','Dimers (Meta-hubs)','Color','k')
+
+for idx = 1:nHubs
+    
+    r = meta_hubs(idx);
+    
+    subplot(nrows, ncols, idx)
+    
+    vals = dimer_norm(:,r);
+    vals(isnan(vals)) = 0;
+    
+    b = bar(vals);
+    b.FaceColor = 'flat';
+    
+    % couleurs
+    b.CData(1,:) = [0 0.45 0.74];
+    b.CData(2,:) = [0.85 0.33 0.10];
+    b.CData(3,:) = [0.64 0.08 0.18];
+    
+    xticks([1 2 3])
+    xticklabels({'G1','G2','G3'})
+    
+    title(sprintf('ROI %d', r))
+    ylim([0 max(dimer_norm(:))*1.2])
+    
+end
+
+sgtitle('Dimers (Meta-hubs only)')
+
+%% =========================
+% TRIMERS META-HUBS
+%% =========================
+
+figure('Name','Trimers (Meta-hubs)','Color','k')
+
+for idx = 1:nHubs
+    
+    r = meta_hubs(idx);
+    
+    subplot(nrows, ncols, idx)
+    
+    vals = trimer_norm(:,r);
+    vals(isnan(vals)) = 0;
+    
+    b = bar(vals);
+    b.FaceColor = 'flat';
+    
+    % couleurs
+    b.CData(1,:) = [0 0.45 0.74];
+    b.CData(2,:) = [0.85 0.33 0.10];
+    b.CData(3,:) = [0.64 0.08 0.18];
+    
+    xticks([1 2 3])
+    xticklabels({'G1','G2','G3'})
+    
+    title(sprintf('ROI %d', r))
+    ylim([0 max(trimer_norm(:))*1.2])
+    
+end
+
+sgtitle('Trimers (Meta-hubs only)')
+
+fprintf('\n===== DONE =====\n')
