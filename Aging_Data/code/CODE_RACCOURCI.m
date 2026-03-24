@@ -2229,30 +2229,65 @@ for r = 1:2
 end
 
 %% ========================================================================
-%  META-HUBS ONLY (BASED ON TRIMERS)
+%  META-HUBS WITH ROI NAMES (68 REGIONS, L/R)
 %% ========================================================================
 
-fprintf('\n===== SELECTING META-HUBS =====\n')
+fprintf('\n===== META-HUBS ANALYSIS =====\n')
 
-% --- importance moyenne des ROI (basée sur trimers) ---
+%% =========================
+% CREATE ROI NAMES (68 régions)
+%% =========================
+
+ROI_names = cell(1, 68);
+
+k = 1;
+for i = 1:length(regions_base)
+    
+    ROI_names{k}   = [regions_base{i} '_L'];
+    ROI_names{k+1} = [regions_base{i} '_R'];
+    
+    k = k + 2;
+    
+end
+
+% sécurité si mismatch
+if length(ROI_names) ~= nROI
+    warning('Mismatch ROI_names / nROI → truncating')
+    ROI_names = ROI_names(1:nROI);
+end
+
+%% =========================
+% SELECT META-HUBS (TRIMERS)
+%% =========================
+
 trimer_importance = mean(trimer_group,1);
 
-% --- seuil (top 20%) ---
-threshold = prctile(trimer_importance, 80);
+threshold = prctile(trimer_importance, 80); % top 20%
 
 meta_hubs = find(trimer_importance >= threshold);
 
 fprintf('Number of meta-hubs: %d / %d\n', length(meta_hubs), nROI)
 
 %% =========================
+% PRINT META-HUB NAMES
+%% =========================
+
+fprintf('\nMeta-hubs detected:\n')
+
+for i = 1:length(meta_hubs)
+    r = meta_hubs(i);
+    fprintf(' - %s (ROI %d)\n', ROI_names{r}, r);
+end
+
+%% =========================
 % NORMALISATION
 %% =========================
 
-dimer_norm = dimer_group ./ dimer_group(1,:);
+dimer_norm  = dimer_group ./ dimer_group(1,:);
 trimer_norm = trimer_group ./ trimer_group(1,:);
 
 %% =========================
-% SUBPLOTS (SEULEMENT META-HUBS)
+% SUBPLOT ORGANISATION
 %% =========================
 
 nHubs = length(meta_hubs);
@@ -2261,7 +2296,7 @@ ncols = ceil(sqrt(nHubs));
 nrows = ceil(nHubs / ncols);
 
 %% =========================
-% DIMERS META-HUBS
+% FIGURE DIMERS
 %% =========================
 
 figure('Name','Dimers (Meta-hubs)','Color','k')
@@ -2278,23 +2313,25 @@ for idx = 1:nHubs
     b = bar(vals);
     b.FaceColor = 'flat';
     
-    % couleurs
-    b.CData(1,:) = [0 0.45 0.74];
-    b.CData(2,:) = [0.85 0.33 0.10];
-    b.CData(3,:) = [0.64 0.08 0.18];
+    % couleurs groupes
+    b.CData(1,:) = [0 0.45 0.74];    % G1 (Young)
+    b.CData(2,:) = [0.85 0.33 0.10]; % G2 (Middle)
+    b.CData(3,:) = [0.64 0.08 0.18]; % G3 (Old)
     
     xticks([1 2 3])
     xticklabels({'G1','G2','G3'})
     
-    title(sprintf('ROI %d', r))
+    title(ROI_names{r}, 'Interpreter','none')
+    
     ylim([0 max(dimer_norm(:))*1.2])
+    grid on
     
 end
 
 sgtitle('Dimers (Meta-hubs only)')
 
 %% =========================
-% TRIMERS META-HUBS
+% FIGURE TRIMERS
 %% =========================
 
 figure('Name','Trimers (Meta-hubs)','Color','k')
@@ -2311,7 +2348,7 @@ for idx = 1:nHubs
     b = bar(vals);
     b.FaceColor = 'flat';
     
-    % couleurs
+    % couleurs groupes
     b.CData(1,:) = [0 0.45 0.74];
     b.CData(2,:) = [0.85 0.33 0.10];
     b.CData(3,:) = [0.64 0.08 0.18];
@@ -2319,11 +2356,77 @@ for idx = 1:nHubs
     xticks([1 2 3])
     xticklabels({'G1','G2','G3'})
     
-    title(sprintf('ROI %d', r))
+    title(ROI_names{r}, 'Interpreter','none')
+    
     ylim([0 max(trimer_norm(:))*1.2])
+    grid on
     
 end
 
 sgtitle('Trimers (Meta-hubs only)')
 
 fprintf('\n===== DONE =====\n')
+
+%% 2. STATISTIQUES ET PRÉPARATION DES GRAPHIQUES
+% Moyenne globale pour identifier les Hubs
+mean_nodal_tMC = mean(nodal_tMC_all, 1);
+
+% --- NOUVEAU : CALCUL DU SEUIL (Threshold) ---
+% On définit le seuil au 80ème percentile (Top 20% des régions)
+threshold_hubs = prctile(mean_nodal_tMC, 80); 
+% ---------------------------------------------
+
+[sorted_hubs, idx_hubs] = sort(mean_nodal_tMC, 'ascend');
+
+% Corrélations avec l'âge (inchangé)
+r_age = zeros(N_nodes, 1);
+p_age = zeros(N_nodes, 1);
+for i = 1:N_nodes
+    [r_age(i), p_age(i)] = corr(ages, nodal_tMC_all(:, i));
+end
+[sorted_r, idx_r] = sort(r_age, 'ascend');
+
+%% 3. GÉNÉRATION DES FIGURES
+figure('Name', 'Analyse Régionale des Trimères', 'Color', 'k', 'Units', 'normalized', 'Position', [0.1 0.1 0.8 0.8]);
+
+% --- GRAPH A : Nodal Trimer Strength (Identification des Meta-hubs) ---
+subplot(1, 2, 1);
+b1 = barh(1:N_nodes, sorted_hubs, 'FaceColor', [0.3 0.3 0.3], 'EdgeColor', 'none');
+hold on;
+
+% Colorer uniquement les régions qui dépassent le seuil
+for m = 1:N_nodes
+    if sorted_hubs(m) >= threshold_hubs
+        % On utilise une couleur Or/Ambre pour les hubs significatifs
+        patch([0 sorted_hubs(m) sorted_hubs(m) 0], [m-0.4 m-0.4 m+0.4 m+0.4], [0.9 0.6 0.1], 'EdgeColor', 'none');
+    end
+end
+
+% Ajouter une ligne verticale pour visualiser le seuil
+xline(threshold_hubs, '--w', 'Label', 'Seuil (Top 20%)', 'LabelOrientation', 'aligned', 'Color', [0.5 0.5 0.5]);
+
+set(gca, 'Color', 'k', 'XColor', 'w', 'YColor', 'w', 'FontSize', 7);
+set(gca, 'YTick', 1:N_nodes, 'YTickLabel', labels_68(idx_hubs)); 
+xlabel('Nodal Trimer Strength (tMC)');
+title(['A. Meta-hubs (Seuil > ', num2str(threshold_hubs, '%.2f'), ')'], 'Color', 'w', 'FontSize', 12);
+grid on; set(gca, 'GridColor', [0.2 0.2 0.2]);
+
+% --- GRAPH B : Effet de l'Âge (Reste identique mais intégré pour la cohérence) ---
+subplot(1, 2, 2);
+b2 = barh(1:N_nodes, sorted_r, 'FaceColor', 'flat', 'EdgeColor', 'none');
+for i = 1:N_nodes
+    actual_roi_idx = idx_r(i);
+    if p_age(actual_roi_idx) < 0.05
+        b2.CData(i, :) = [0.8 0.2 0.2]; % Rouge si significatif
+    else
+        b2.CData(i, :) = [0.4 0.4 0.4]; % Gris sinon
+    end
+end
+
+set(gca, 'Color', 'k', 'XColor', 'w', 'YColor', 'w', 'FontSize', 7);
+set(gca, 'YTick', 1:N_nodes, 'YTickLabel', labels_68(idx_r));
+xlabel('Corrélation avec l''Âge (Pearson r)');
+title('B. Sensibilité au Vieillissement (Rouge: p < 0.05)', 'Color', 'w', 'FontSize', 12);
+grid on; set(gca, 'GridColor', [0.2 0.2 0.2]);
+
+sgtitle('Organisation Spatio-temporelle des Trimères (Analyse par Threshold)', 'Color', 'w', 'FontSize', 16);
