@@ -2805,3 +2805,574 @@ end
 sgtitle('Interzone Trimer Strength (Meta-hubs)')
 
 fprintf('\n===== DONE =====\n')
+
+%% ========================================================================
+%  GRAPH : MÉTA-CONNECTIVITÉ (MC) TRIÉE PAR MODULES (FIX SIZE ERROR)
+%% ========================================================================
+
+% 1. DÉTERMINER LA TAILLE RÉELLE (Évite l'erreur de taille incompatible)
+SUB_temp = eval(sprintf('SUBJECT_%d', 1));
+MC_example = dFCstream2MC(SUB_temp.dFCstream); 
+[n_mc, ~] = size(MC_example); % Récupère la taille réelle (ex: 2278)
+
+MC_mean_groups = zeros(n_mc, n_mc, 3);
+titles_mc = {'Jeunes (G1)', 'Moyens (G2)', 'Seniors (G3)'};
+
+% 2. CALCUL DES MOYENNES PAR GROUPE
+fprintf('Extraction et moyenne des MC pour %d sujets...\n', N);
+for k = 1:3
+    idx_g = find(groups == k);
+    sum_mc = zeros(n_mc, n_mc);
+    
+    for i = 1:length(idx_g)
+        S = eval(sprintf('SUBJECT_%d', idx_g(i)));
+        MC_sub = dFCstream2MC(S.dFCstream);
+        
+        % Vérification de sécurité pour la taille
+        if size(MC_sub, 1) == n_mc
+            sum_mc = sum_mc + MC_sub;
+        else
+            warning('Sujet %d ignoré : taille MC incompatible (%dx%d)', idx_g(i), size(MC_sub,1), size(MC_sub,2));
+        end
+    end
+    MC_mean_groups(:,:,k) = sum_mc / length(idx_g);
+end
+
+%% ========================================================================
+%  AFFICHAGE DE LA MC EXISTANTE (TRIÉE PAR MODULES, GESTION NÉGATIFS)
+%% ========================================================================
+% Ce code suppose que 'MC_mean_groups' ($N_{edges} \times N_{edges} \times 3$)
+% est déjà dans votre workspace.
+
+% 1. VÉRIFICATION ET INITIALISATION
+if ~exist('MC_mean_groups', 'var')
+    error('La variable MC_mean_groups n''est pas dans le workspace. Impossible d''afficher.');
+end
+
+n_mc = size(MC_mean_groups, 1); % Nombre de connexions (ex: 2278)
+titles_mc = {'Jeunes (G1)', 'Moyens (G2)', 'Seniors (G3)'};
+
+fprintf('Variable détectée (%dx%d). Préparation de l''affichage...\n', n_mc, n_mc);
+
+% 2. DÉTECTION DES MODULES SUR G1 (Correction Poids Négatifs)
+% On utilise G1 comme référence pour définir l'ordre des lignes/colonnes
+fprintf('Détection des méta-modules sur G1 (Option negative_sym)...\n');
+MC_ref = MC_mean_groups(:,:,1);
+MC_ref(logical(eye(n_mc))) = 0; % Mise à zéro de la diagonale
+
+% Paramètres Louvain adaptés (gamma=1.1, gestion symétrique des négatifs)
+gamma_mc = 1.1; 
+[Ci_mc, ~] = community_louvain(MC_ref, gamma_mc, [], 'negative_sym');
+
+% Tri des indices pour regrouper les modules sur la diagonale
+[Ci_sorted_mc, idx_sort_mc] = sort(Ci_mc);
+
+
+% 3. GÉNÉRATION DE LA FIGURE COMPARATIVE
+figure('Name', 'Méta-Connectivité : Comparaison par Groupes d''Âge', ...
+       'Color', 'k', 'Units', 'normalized', 'Position', [0.05 0.2 0.9 0.5]);
+
+for k = 1:3
+    subplot(1, 3, k);
+    
+    % Application du tri de G1 à la matrice du groupe k
+    MC_plot = MC_mean_groups(idx_sort_mc, idx_sort_mc, k);
+    MC_plot(logical(eye(n_mc))) = 0; % Diagonale à zéro pour le plot
+    
+    % Affichage
+    imagesc(MC_plot);
+    axis square; 
+    colormap(turbo); % Contraste élevé
+    colorbar;
+    clim([0 0.4]); % Limites ajustées pour voir la structure moyenne
+    
+    % Esthétique (Fond noir, texte blanc)
+    set(gca, 'Color', 'k', 'XColor', 'w', 'YColor', 'w', 'FontSize', 9);
+    title(titles_mc{k}, 'Color', 'w', 'FontSize', 14, 'FontWeight', 'bold');
+    
+    if k == 1
+        ylabel('Connexions (triées par modules G1)', 'Color', 'w');
+    end
+    xlabel('Connexions (triées)', 'Color', 'w');
+    
+    % TRACÉ DES FRONTIÈRES DES MODULES
+    hold on;
+    pos = 0;
+    u_mod = unique(Ci_sorted_mc);
+    for m = 1:length(u_mod)
+        n_in_mod = sum(Ci_sorted_mc == u_mod(m)); % Taille du module
+        pos = pos + n_in_mod;
+        % Lignes pointillées blanches discrètes
+        line([pos pos], [0 n_mc], 'Color', [1 1 1 0.3], 'LineWidth', 0.5, 'LineStyle', ':');
+        line([0 n_mc], [pos pos], 'Color', [1 1 1 0.3], 'LineWidth', 0.5, 'LineStyle', ':');
+    end
+end
+
+% Titre principal
+sgtitle('Organisation Modulaire de la Méta-Connectivité (Référence G1)', ...
+        'Color', 'w', 'FontSize', 18, 'FontWeight', 'bold');
+
+fprintf('Affichage terminé.\n');
+
+%% =========================
+% META-HUBS / ROI SELECTION (MODULE-WISE, FLEXIBLE)
+%% =========================
+
+% modules : vecteur [1 x nROI]
+% group   : vecteur groupe sujet
+% dimer_roi, trimer_roi : [nSubjects x nROI]
+
+unique_modules = unique(modules);
+selected_rois = [];
+
+% ===== CHOIX DU MODE =====
+selection_mode = 'all';  
+% 'all'           -> toutes les ROI
+% 'low_threshold' -> seuil faible par module
+% 'topk'          -> top k par module
+
+low_percentile = 30;   % seuil faible si mode = 'low_threshold'
+k_fixed = 3;           % nb de ROI par module si mode = 'topk'
+
+for m = unique_modules
+    
+    roi_in_module = find(modules == m);
+    values = mean(trimer_roi(:, roi_in_module), 1, 'omitnan');
+    
+    switch selection_mode
+        
+        case 'all'
+            rois_module = roi_in_module;
+            
+        case 'low_threshold'
+            thr = prctile(values, low_percentile);
+            rois_module = roi_in_module(values >= thr);
+            
+            % sécurité
+            if isempty(rois_module)
+                [~, idx_max] = max(values);
+                rois_module = roi_in_module(idx_max);
+            end
+            
+        case 'topk'
+            k = min(k_fixed, length(roi_in_module));
+            [~, idx_sorted] = sort(values, 'descend');
+            rois_module = roi_in_module(idx_sorted(1:k));
+            
+        otherwise
+            error('selection_mode inconnu');
+    end
+    
+    selected_rois = [selected_rois rois_module];
+    
+    fprintf('Module %d : %d ROI sélectionnées\n', m, length(rois_module));
+end
+
+selected_rois = unique(selected_rois, 'stable');
+
+fprintf('ROI sélectionnées total : %d / %d\n', length(selected_rois), nROI);
+disp('Indices ROI sélectionnées :')
+disp(selected_rois)
+disp('Noms ROI sélectionnées :')
+disp(ROI_names(selected_rois))
+
+
+%% =========================
+% COMPUTE MEAN + SEM PAR GROUPE
+%% =========================
+
+dimer_mean  = zeros(3,nROI);
+dimer_sem   = zeros(3,nROI);
+
+trimer_mean = zeros(3,nROI);
+trimer_sem  = zeros(3,nROI);
+
+for g = 1:3
+    
+    idx = (group == g);
+    
+    dimer_mean(g,:)  = mean(dimer_roi(idx,:), 1, 'omitnan');
+    trimer_mean(g,:) = mean(trimer_roi(idx,:), 1, 'omitnan');
+    
+    dimer_sem(g,:)  = std(dimer_roi(idx,:), 0, 1, 'omitnan') ./ sqrt(sum(idx));
+    trimer_sem(g,:) = std(trimer_roi(idx,:), 0, 1, 'omitnan') ./ sqrt(sum(idx));
+    
+end
+
+
+%% =========================
+% SUBPLOT ORGANISATION
+%% =========================
+
+nSel = length(selected_rois);
+ncols = ceil(sqrt(nSel));
+nrows = ceil(nSel / ncols);
+
+% couleurs : dimers = tons pleins, trimers = tons plus clairs
+colors_dimer = [ ...
+    0.00 0.60 0.30;
+    0.80 0.80 0.20;
+    0.85 0.33 0.10
+];
+
+colors_trimer = [ ...
+    0.40 0.85 0.65;
+    0.95 0.95 0.55;
+    1.00 0.55 0.35
+];
+
+
+%% =========================
+% FIGURE UNIQUE : DIMER + TRIMER DANS LE MEME SUBPLOT
+%% =========================
+
+figure('Name','Dimers + Trimers (Module-wise)','Color','k')
+
+for i = 1:nSel
+    
+    r = selected_rois(i);
+    subplot(nrows, ncols, i)
+    hold on
+    
+    % positions barres
+    x_dimer  = [1 2 3];
+    x_trimer = [1.35 2.35 3.35];
+    
+    vals_d = dimer_mean(:,r);
+    err_d  = dimer_sem(:,r);
+    
+    vals_t = trimer_mean(:,r);
+    err_t  = trimer_sem(:,r);
+    
+    % DIMER
+    for g = 1:3
+        bar(x_dimer(g), vals_d(g), 0.28, ...
+            'FaceColor', colors_dimer(g,:), ...
+            'EdgeColor', 'none');
+    end
+    
+    % TRIMER
+    for g = 1:3
+        bar(x_trimer(g), vals_t(g), 0.28, ...
+            'FaceColor', colors_trimer(g,:), ...
+            'EdgeColor', 'none');
+    end
+    
+    % erreurs
+    errorbar(x_dimer, vals_d, err_d, 'w', 'LineStyle', 'none', 'LineWidth', 1)
+    errorbar(x_trimer, vals_t, err_t, 'w', 'LineStyle', 'none', 'LineWidth', 1)
+    
+    xticks([1.175 2.175 3.175])
+    xticklabels({'Jeune','Moyen','Agée'})
+    
+    title(sprintf('%s (M%d)', ROI_names{r}, modules(r)), 'Interpreter', 'none')
+    
+    ylabel('Strength')
+    grid on
+    box off
+    
+    % adapte automatiquement la limite Y
+    ymax = max([vals_d + err_d; vals_t + err_t], [], 'all');
+    if isempty(ymax) || isnan(ymax) || ymax <= 0
+        ymax = 0.1;
+    end
+    ylim([0 ymax * 1.25])
+    
+    % légende seulement sur le premier subplot
+    if i == 1
+        h1 = bar(nan, nan, 'FaceColor', colors_dimer(1,:), 'EdgeColor', 'none');
+        h2 = bar(nan, nan, 'FaceColor', colors_trimer(1,:), 'EdgeColor', 'none');
+        legend([h1 h2], {'Dimer','Trimer'}, 'Location', 'best')
+    end
+end
+
+sgtitle(sprintf('Dimer + Trimer Strength par ROI (%s)', selection_mode))
+
+fprintf('\n===== DONE =====\n')
+
+%% =========================
+% INTRA vs INTER MODULAR ANALYSIS
+% (ROI-level approximation)
+%% =========================
+
+% Variables attendues :
+% dimer_roi   : [49 x 68]
+% trimer_roi  : [49 x 68]
+% Ci          : [68 x 1]  -> module de chaque ROI
+% group       : [49 x 1] ou [1 x 49]
+
+%% =========================
+% BASIC SIZES
+%% =========================
+
+nSub = size(dimer_roi,1);
+nROI = size(dimer_roi,2);
+
+if size(trimer_roi,1) ~= nSub || size(trimer_roi,2) ~= nROI
+    error('dimer_roi et trimer_roi n''ont pas la même taille.');
+end
+
+group = group(:);
+modules = Ci(:)';   % <- FIX IMPORTANT
+
+if length(modules) ~= nROI
+    error('Le vecteur Ci ne correspond pas au nombre de ROI.');
+end
+
+fprintf('Taille dimer_roi  : [%d x %d]\n', size(dimer_roi,1), size(dimer_roi,2));
+fprintf('Taille trimer_roi : [%d x %d]\n', size(trimer_roi,1), size(trimer_roi,2));
+fprintf('Taille modules    : [%d x %d]\n', size(modules,1), size(modules,2));
+
+%% =========================
+% COMPUTE INTRA / INTER PAR ROI
+%% =========================
+
+intra_dimer  = NaN(nSub, nROI);
+inter_dimer  = NaN(nSub, nROI);
+
+intra_trimer = NaN(nSub, nROI);
+inter_trimer = NaN(nSub, nROI);
+
+for r = 1:nROI
+    
+    same_module  = (modules == modules(r));
+    other_module = (modules ~= modules(r));
+    
+    % enlever la ROI elle-même du intra
+    same_module(r) = false;
+    
+    % intra
+    if any(same_module)
+        intra_dimer(:,r)  = mean(dimer_roi(:, same_module), 2, 'omitnan');
+        intra_trimer(:,r) = mean(trimer_roi(:, same_module), 2, 'omitnan');
+    end
+    
+    % inter
+    if any(other_module)
+        inter_dimer(:,r)  = mean(dimer_roi(:, other_module), 2, 'omitnan');
+        inter_trimer(:,r) = mean(trimer_roi(:, other_module), 2, 'omitnan');
+    end
+end
+
+fprintf('Intra/inter ROI-level calculés.\n');
+
+%% =========================
+% MOYENNE GLOBALE PAR SUJET
+%% =========================
+
+subj_intra_dimer  = mean(intra_dimer,  2, 'omitnan');
+subj_inter_dimer  = mean(inter_dimer,  2, 'omitnan');
+
+subj_intra_trimer = mean(intra_trimer, 2, 'omitnan');
+subj_inter_trimer = mean(inter_trimer, 2, 'omitnan');
+
+%% =========================
+% STATS PAR GROUPE
+%% =========================
+
+nGroups = 3;
+
+intra_d_mean  = NaN(nGroups,1);
+inter_d_mean  = NaN(nGroups,1);
+intra_t_mean  = NaN(nGroups,1);
+inter_t_mean  = NaN(nGroups,1);
+
+intra_d_sem   = NaN(nGroups,1);
+inter_d_sem   = NaN(nGroups,1);
+intra_t_sem   = NaN(nGroups,1);
+inter_t_sem   = NaN(nGroups,1);
+
+for g = 1:nGroups
+    
+    idx = (group == g);
+    
+    intra_d_mean(g) = mean(subj_intra_dimer(idx), 'omitnan');
+    inter_d_mean(g) = mean(subj_inter_dimer(idx), 'omitnan');
+    
+    intra_t_mean(g) = mean(subj_intra_trimer(idx), 'omitnan');
+    inter_t_mean(g) = mean(subj_inter_trimer(idx), 'omitnan');
+    
+    intra_d_sem(g) = std(subj_intra_dimer(idx), 'omitnan') / sqrt(sum(idx));
+    inter_d_sem(g) = std(subj_inter_dimer(idx), 'omitnan') / sqrt(sum(idx));
+    
+    intra_t_sem(g) = std(subj_intra_trimer(idx), 'omitnan') / sqrt(sum(idx));
+    inter_t_sem(g) = std(subj_inter_trimer(idx), 'omitnan') / sqrt(sum(idx));
+end
+
+%% =========================
+% AFFICHAGE NUMERIQUE
+%% =========================
+
+fprintf('\n===== GROUP RESULTS =====\n');
+for g = 1:nGroups
+    fprintf('Groupe %d\n', g);
+    fprintf('  Dimer  intra = %.4f ± %.4f\n', intra_d_mean(g), intra_d_sem(g));
+    fprintf('  Dimer  inter = %.4f ± %.4f\n', inter_d_mean(g), inter_d_sem(g));
+    fprintf('  Trimer intra = %.4f ± %.4f\n', intra_t_mean(g), intra_t_sem(g));
+    fprintf('  Trimer inter = %.4f ± %.4f\n\n', inter_t_mean(g), inter_t_sem(g));
+end
+
+%% =========================
+% FIGURE 1 : COURBES GLOBALES
+%% =========================
+
+figure('Name','Intra vs Inter - Global','Color','w');
+hold on
+
+x = 1:nGroups;
+
+errorbar(x, intra_d_mean, intra_d_sem, '-o', 'LineWidth', 2, 'MarkerSize', 7)
+errorbar(x, inter_d_mean, inter_d_sem, '--o', 'LineWidth', 2, 'MarkerSize', 7)
+
+errorbar(x, intra_t_mean, intra_t_sem, '-s', 'LineWidth', 2, 'MarkerSize', 7)
+errorbar(x, inter_t_mean, inter_t_sem, '--s', 'LineWidth', 2, 'MarkerSize', 7)
+
+xticks([1 2 3])
+xticklabels({'Jeune','Moyen','Agée'})
+
+ylabel('Strength')
+title('Intra vs Inter Modular Strength')
+legend({'Dimer Intra','Dimer Inter','Trimer Intra','Trimer Inter'}, 'Location','best')
+grid on
+box off
+
+%% =========================
+% FIGURE 2 : BARPLOT
+%% =========================
+
+figure('Name','Intra vs Inter - Bars','Color','w')
+
+colors = [
+    0.00 0.60 0.30
+    0.80 0.80 0.20
+    0.85 0.33 0.10
+];
+
+subplot(1,2,1)
+hold on
+
+x_intra = [1 2 3];
+x_inter = [1.35 2.35 3.35];
+
+for g = 1:nGroups
+    bar(x_intra(g), intra_d_mean(g), 0.28, 'FaceColor', colors(g,:), 'EdgeColor', 'none');
+    bar(x_inter(g), inter_d_mean(g), 0.28, 'FaceColor', colors(g,:)*0.6 + 0.4, 'EdgeColor', 'none');
+end
+
+errorbar(x_intra, intra_d_mean, intra_d_sem, 'k', 'LineStyle','none', 'LineWidth',1)
+errorbar(x_inter, inter_d_mean, inter_d_sem, 'k', 'LineStyle','none', 'LineWidth',1)
+
+xticks([1.175 2.175 3.175])
+xticklabels({'Jeune','Moyen','Agée'})
+ylabel('Dimer strength')
+title('Dimer : Intra vs Inter')
+legend({'Intra','Inter'}, 'Location','best')
+grid on
+box off
+
+subplot(1,2,2)
+hold on
+
+for g = 1:nGroups
+    bar(x_intra(g), intra_t_mean(g), 0.28, 'FaceColor', colors(g,:), 'EdgeColor', 'none');
+    bar(x_inter(g), inter_t_mean(g), 0.28, 'FaceColor', colors(g,:)*0.6 + 0.4, 'EdgeColor', 'none');
+end
+
+errorbar(x_intra, intra_t_mean, intra_t_sem, 'k', 'LineStyle','none', 'LineWidth',1)
+errorbar(x_inter, inter_t_mean, inter_t_sem, 'k', 'LineStyle','none', 'LineWidth',1)
+
+xticks([1.175 2.175 3.175])
+xticklabels({'Jeune','Moyen','Agée'})
+ylabel('Trimer strength')
+title('Trimer : Intra vs Inter')
+legend({'Intra','Inter'}, 'Location','best')
+grid on
+box off
+
+sgtitle('Intra vs Inter Modular Analysis')
+
+%% =========================
+% FIGURE 3 : PAR MODULE (AVEC BARRES D'ERREUR)
+%% =========================
+
+unique_modules = unique(modules);
+nMod = length(unique_modules);
+
+module_intra_d = NaN(nGroups, nMod);
+module_inter_d = NaN(nGroups, nMod);
+module_intra_t = NaN(nGroups, nMod);
+module_inter_t = NaN(nGroups, nMod);
+
+% 👉 SEM
+module_intra_d_sem = NaN(nGroups, nMod);
+module_inter_d_sem = NaN(nGroups, nMod);
+module_intra_t_sem = NaN(nGroups, nMod);
+module_inter_t_sem = NaN(nGroups, nMod);
+
+for im = 1:nMod
+    
+    m = unique_modules(im);
+    roi_idx = (modules == m);
+    
+    subj_mod_intra_d = mean(intra_dimer(:, roi_idx), 2, 'omitnan');
+    subj_mod_inter_d = mean(inter_dimer(:, roi_idx), 2, 'omitnan');
+    
+    subj_mod_intra_t = mean(intra_trimer(:, roi_idx), 2, 'omitnan');
+    subj_mod_inter_t = mean(inter_trimer(:, roi_idx), 2, 'omitnan');
+    
+    for g = 1:nGroups
+        idx = (group == g);
+        
+        % ===== MEAN =====
+        module_intra_d(g,im) = mean(subj_mod_intra_d(idx), 'omitnan');
+        module_inter_d(g,im) = mean(subj_mod_inter_d(idx), 'omitnan');
+        
+        module_intra_t(g,im) = mean(subj_mod_intra_t(idx), 'omitnan');
+        module_inter_t(g,im) = mean(subj_mod_inter_t(idx), 'omitnan');
+        
+        % ===== SEM =====
+        module_intra_d_sem(g,im) = std(subj_mod_intra_d(idx), 'omitnan') / sqrt(sum(idx));
+        module_inter_d_sem(g,im) = std(subj_mod_inter_d(idx), 'omitnan') / sqrt(sum(idx));
+        
+        module_intra_t_sem(g,im) = std(subj_mod_intra_t(idx), 'omitnan') / sqrt(sum(idx));
+        module_inter_t_sem(g,im) = std(subj_mod_inter_t(idx), 'omitnan') / sqrt(sum(idx));
+    end
+end
+
+figure('Name','Intra vs Inter by Module','Color','k')
+
+ncols = ceil(sqrt(nMod));
+nrows = ceil(nMod / ncols);
+
+for im = 1:nMod
+    
+    subplot(nrows, ncols, im)
+    hold on
+    
+    x = 1:nGroups;
+    
+    % ===== COURBES =====
+    plot(x, module_intra_d(:,im), '-o', 'LineWidth', 1.8)
+    plot(x, module_inter_d(:,im), '--o', 'LineWidth', 1.8)
+    plot(x, module_intra_t(:,im), '-s', 'LineWidth', 1.8)
+    plot(x, module_inter_t(:,im), '--s', 'LineWidth', 1.8)
+    
+    % ===== BARRES D'ERREUR BLANCHES =====
+    errorbar(x, module_intra_d(:,im), module_intra_d_sem(:,im), 'w', 'LineStyle','none', 'LineWidth',1)
+    errorbar(x, module_inter_d(:,im), module_inter_d_sem(:,im), 'w', 'LineStyle','none', 'LineWidth',1)
+    
+    errorbar(x, module_intra_t(:,im), module_intra_t_sem(:,im), 'w', 'LineStyle','none', 'LineWidth',1)
+    errorbar(x, module_inter_t(:,im), module_inter_t_sem(:,im), 'w', 'LineStyle','none', 'LineWidth',1)
+    
+    xticks([1 2 3])
+    xticklabels({'Jeune','Moyen','Agée'})
+    
+    title(sprintf('Module %d', unique_modules(im)))
+    
+    grid on
+    box off
+end
+
+sgtitle('Intra vs Inter per Module (avec SEM)')
+
+fprintf('\n===== DONE =====\n');
