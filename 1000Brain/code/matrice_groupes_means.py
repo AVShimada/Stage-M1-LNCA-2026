@@ -418,3 +418,223 @@ print("\nRésumé :")
 print(summary.T)
 
 print(f"\nTous les résultats ont été enregistrés dans : {output_dir}")
+
+import networkx as nx
+import community as community_louvain
+
+def get_module_boundaries(sorted_module_labels):
+    boundaries = []
+    for i in range(1, len(sorted_module_labels)):
+        if sorted_module_labels[i] != sorted_module_labels[i - 1]:
+            boundaries.append(i - 0.5)
+    return boundaries
+
+def plot_sorted_matrix(ax, mat, sorted_idx, sorted_module_labels, title, vmin=None, vmax=None, cmap="viridis"):
+    mat_sorted = mat[np.ix_(sorted_idx, sorted_idx)]
+
+    im = ax.imshow(mat_sorted, cmap=cmap, vmin=vmin, vmax=vmax)
+    ax.set_title(title)
+    ax.set_xlabel("Nœuds triés par module")
+    ax.set_ylabel("Nœuds triés par module")
+
+    boundaries = get_module_boundaries(sorted_module_labels)
+    for b in boundaries:
+        ax.axhline(b, color="white", linestyle=":", linewidth=1)
+        ax.axvline(b, color="white", linestyle=":", linewidth=1)
+
+    plt.colorbar(im, ax=ax, fraction=0.046, pad=0.04)
+
+def louvain_labels_from_matrix(mat, modality="FC", resolution=1.3):
+    mat = np.array(mat, dtype=float).copy()
+    np.fill_diagonal(mat, 0)
+
+    if modality == "FC":
+        mat[mat < 0] = 0
+
+    mat[~np.isfinite(mat)] = 0
+    G = nx.from_numpy_array(mat)
+
+    part = community_louvain.best_partition(
+        G,
+        weight="weight",
+        resolution=resolution,
+        random_state=None
+    )
+
+    n_nodes = mat.shape[0]
+    return np.array([part[i] for i in range(n_nodes)], dtype=int)
+
+def agreement_matrix_from_partitions(partitions):
+    partitions = np.asarray(partitions)
+    n_runs, n_nodes = partitions.shape
+    agreement = np.zeros((n_nodes, n_nodes), dtype=float)
+
+    for r in range(n_runs):
+        labels = partitions[r]
+        same_module = labels[:, None] == labels[None, :]
+        agreement += same_module.astype(float)
+
+    agreement /= n_runs
+    return agreement
+
+def relabel_consecutive(labels):
+    unique_vals = np.unique(labels)
+    mapping = {old: new for new, old in enumerate(unique_vals)}
+    return np.array([mapping[x] for x in labels], dtype=int)
+
+def consensus_louvain(mat, modality="FC", resolution=1.3, n_runs=200, threshold=0.5):
+    mat = np.array(mat, dtype=float).copy()
+    np.fill_diagonal(mat, 0)
+
+    if modality == "FC":
+        mat[mat < 0] = 0
+
+    mat[~np.isfinite(mat)] = 0
+    n_nodes = mat.shape[0]
+
+    partitions = []
+    for _ in range(n_runs):
+        labels = louvain_labels_from_matrix(mat, modality=modality, resolution=resolution)
+        partitions.append(labels)
+    partitions = np.array(partitions)
+
+    agreement = agreement_matrix_from_partitions(partitions)
+
+    agreement_thr = agreement.copy()
+    agreement_thr[agreement_thr < threshold] = 0
+    np.fill_diagonal(agreement_thr, 0)
+
+    G_consensus = nx.from_numpy_array(agreement_thr)
+    final_part = community_louvain.best_partition(
+        G_consensus,
+        weight="weight",
+        resolution=1.0,
+        random_state=42
+    )
+
+    final_labels = np.array([final_part[i] for i in range(n_nodes)], dtype=int)
+    final_labels = relabel_consecutive(final_labels)
+
+    sorted_idx = np.argsort(final_labels)
+    sorted_labels = final_labels[sorted_idx]
+    partition_dict = {i: int(final_labels[i]) for i in range(n_nodes)}
+
+    return partition_dict, sorted_idx, sorted_labels, agreement, agreement_thr, partitions
+
+# Référence pour le tri modulaire
+if fc_young_mean is not None:
+    ref_mat = fc_young_mean
+    ref_modality = "FC"
+    ref_name = "FC <55"
+elif fc_old_mean is not None:
+    ref_mat = fc_old_mean
+    ref_modality = "FC"
+    ref_name = "FC >=55"
+elif sc_young_mean is not None:
+    ref_mat = sc_young_mean
+    ref_modality = "SC"
+    ref_name = "SC <55"
+elif sc_old_mean is not None:
+    ref_mat = sc_old_mean
+    ref_modality = "SC"
+    ref_name = "SC >=55"
+else:
+    raise ValueError("Aucune matrice disponible pour la détection modulaire.")
+
+partition_dict, sorted_idx, sorted_module_labels, agreement, agreement_thr, partitions = consensus_louvain(
+    ref_mat,
+    modality=ref_modality,
+    resolution=1.3,
+    n_runs=200,
+    threshold=0.5
+)
+
+n_modules = len(np.unique(sorted_module_labels))
+print(f"\nRéférence modulaire utilisée : {ref_name}")
+print(f"Nombre de modules détectés : {n_modules}")
+
+# Sauvegardes
+np.save(output_dir / "agreement_matrix.npy", agreement)
+pd.DataFrame(agreement).to_csv(output_dir / "agreement_matrix.csv", index=False, header=False)
+
+np.save(output_dir / "agreement_thresholded.npy", agreement_thr)
+pd.DataFrame(agreement_thr).to_csv(output_dir / "agreement_thresholded.csv", index=False, header=False)
+
+pd.DataFrame(partitions).to_csv(output_dir / "partitions_all_runs.csv", index=False)
+
+module_order_sorted_df = pd.DataFrame({
+    "sorted_position": np.arange(len(sorted_idx)),
+    "original_node_index": sorted_idx,
+    "module": sorted_module_labels
+})
+module_order_sorted_df.to_csv(output_dir / "module_order_sorted.csv", index=False)
+
+# Figures triées
+fc_all_sorted = [m for m in [fc_young_mean, fc_old_mean] if m is not None]
+sc_all_sorted = [m for m in [sc_young_mean, sc_old_mean] if m is not None]
+
+fc_vmin_sorted = min(np.min(m) for m in fc_all_sorted) if fc_all_sorted else None
+fc_vmax_sorted = max(np.max(m) for m in fc_all_sorted) if fc_all_sorted else None
+
+sc_vmin_sorted = min(np.min(m) for m in sc_all_sorted) if sc_all_sorted else None
+sc_vmax_sorted = max(np.max(m) for m in sc_all_sorted) if sc_all_sorted else None
+
+fig, axes = plt.subplots(2, 2, figsize=(14, 12))
+
+if fc_young_mean is not None:
+    plot_sorted_matrix(axes[0, 0], fc_young_mean, sorted_idx, sorted_module_labels,
+                       f"FC moyenne - <55 triée par module (n={len(fc_young_mats)})",
+                       vmin=fc_vmin_sorted, vmax=fc_vmax_sorted, cmap="coolwarm")
+else:
+    axes[0, 0].axis("off")
+
+if fc_old_mean is not None:
+    plot_sorted_matrix(axes[0, 1], fc_old_mean, sorted_idx, sorted_module_labels,
+                       f"FC moyenne - >=55 triée par module (n={len(fc_old_mats)})",
+                       vmin=fc_vmin_sorted, vmax=fc_vmax_sorted, cmap="coolwarm")
+else:
+    axes[0, 1].axis("off")
+
+if sc_young_mean is not None:
+    plot_sorted_matrix(axes[1, 0], sc_young_mean, sorted_idx, sorted_module_labels,
+                       f"SC moyenne - <55 triée par module (n={len(sc_young_mats)})",
+                       vmin=sc_vmin_sorted, vmax=sc_vmax_sorted, cmap="viridis")
+else:
+    axes[1, 0].axis("off")
+
+if sc_old_mean is not None:
+    plot_sorted_matrix(axes[1, 1], sc_old_mean, sorted_idx, sorted_module_labels,
+                       f"SC moyenne - >=55 triée par module (n={len(sc_old_mats)})",
+                       vmin=sc_vmin_sorted, vmax=sc_vmax_sorted, cmap="viridis")
+else:
+    axes[1, 1].axis("off")
+
+plt.suptitle(f"Matrices moyennes FC et SC triées par module (référence : {ref_name})", fontsize=16)
+plt.tight_layout(rect=[0, 0, 1, 0.97])
+plt.savefig(output_dir / "group_average_matrices_FC_SC_sorted_by_modules.png", bbox_inches="tight")
+plt.show()
+plt.close()
+
+fig, axes = plt.subplots(1, 2, figsize=(14, 6))
+
+if fc_diff is not None:
+    vmax_fc_diff = np.max(np.abs(fc_diff))
+    plot_sorted_matrix(axes[0], fc_diff, sorted_idx, sorted_module_labels,
+                       "Différence FC : >=55 - <55 (triée par module)",
+                       vmin=-vmax_fc_diff, vmax=vmax_fc_diff, cmap="bwr")
+else:
+    axes[0].axis("off")
+
+if sc_diff is not None:
+    vmax_sc_diff = np.max(np.abs(sc_diff))
+    plot_sorted_matrix(axes[1], sc_diff, sorted_idx, sorted_module_labels,
+                       "Différence SC : >=55 - <55 (triée par module)",
+                       vmin=-vmax_sc_diff, vmax=vmax_sc_diff, cmap="bwr")
+else:
+    axes[1].axis("off")
+
+plt.suptitle(f"Différences entre groupes d'âge triées par module (référence : {ref_name})", fontsize=16)
+plt.tight_layout(rect=[0, 0, 1, 0.95])
+plt.savefig(output_dir / "group_difference_matrices_FC_SC_sorted_by_modules.png", bbox_inches="tight")
+plt.show()
+plt.close()
