@@ -315,3 +315,49 @@ df_final = pd.concat([df.reset_index(drop=True), scores_pca.reset_index(drop=Tru
 df_final.to_csv(output_dir / "15_dataframe_complet_avec_scores_PCA.csv", index=False)
 
 print(f"\nTous les résultats ont été enregistrés dans : {output_dir}")
+
+# Renommer ID -> id pour faciliter le merge
+df = df.rename(columns={"ID": "id"})
+
+# S'assurer que id est entier
+df["id"] = pd.to_numeric(df["id"], errors="coerce").astype("Int64")
+
+# =========================
+# 2. Charger les données démographiques
+# =========================
+# Adapte read_csv / sep si besoin selon ton fichier réel
+df_demo = pd.read_csv(
+    r"C:\Users\aure6\Downloads\1000BRAINSconnectomes_Jirsa\Demographic_data.csv",
+    sep=";",
+    na_values=["na", "NA", "NULL"]
+)
+
+# Nettoyage noms de colonnes
+df_demo.columns = df_demo.columns.str.strip()
+
+# Vérification
+print("Colonnes df_demo :", df_demo.columns.tolist())
+print(df_demo.head())
+
+# =========================
+# 3. Convertir id de type sub-0001 -> 1
+# =========================
+df_demo["id_bids"] = df_demo["id"]                  # garder une copie texte
+df_demo["id"] = df_demo["id"].str.replace("sub-", "", regex=False)
+df_demo["id"] = pd.to_numeric(df_demo["id"], errors="coerce").astype("Int64")
+
+# =========================
+# 4. Vérifier les IDs
+# =========================
+print(df_demo[["id_bids", "id"]].head())
+
+# =========================
+# 5. Merge
+# =========================
+df_merged = df.merge(df_demo, on="id", how="inner")
+
+print("Taille cognition :", df.shape)
+print("Taille demographic :", df_demo.shape)
+print("Taille merge :", df_merged.shape)
+
+print(df_merged[["id", "Sex_x", "Sex_y"]].head() if "Sex_x" in df_merged.columns else df_merged.head())
