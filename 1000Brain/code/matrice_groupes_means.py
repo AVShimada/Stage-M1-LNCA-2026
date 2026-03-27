@@ -188,7 +188,7 @@ def save_matrix_outputs(mat, base_name):
     pd.DataFrame(mat).to_csv(output_dir / f"{base_name}.csv", index=False, header=False)
 
 
-def plot_matrix(ax, mat, title, vmin=None, vmax=None, cmap="viridis"):
+def plot_matrix(ax, mat, title, vmin=None, vmax=None, cmap="turbo"):
     im = ax.imshow(mat, cmap=cmap, vmin=vmin, vmax=vmax)
     ax.set_title(title)
     ax.set_xlabel("Nœuds")
@@ -302,7 +302,7 @@ if fc_young_mean is not None:
         f"FC moyenne - <55 (n={len(fc_young_mats)})",
         vmin=fc_vmin,
         vmax=fc_vmax,
-        cmap="coolwarm"
+        cmap="turbo"
     )
 else:
     axes[0, 0].set_title("FC moyenne - <55 indisponible")
@@ -315,7 +315,7 @@ if fc_old_mean is not None:
         f"FC moyenne - >=55 (n={len(fc_old_mats)})",
         vmin=fc_vmin,
         vmax=fc_vmax,
-        cmap="coolwarm"
+        cmap="turbo"
     )
 else:
     axes[0, 1].set_title("FC moyenne - >=55 indisponible")
@@ -328,7 +328,7 @@ if sc_young_mean is not None:
         f"SC moyenne - <55 (n={len(sc_young_mats)})",
         vmin=sc_vmin,
         vmax=sc_vmax,
-        cmap="viridis"
+        cmap="turbo"
     )
 else:
     axes[1, 0].set_title("SC moyenne - <55 indisponible")
@@ -341,7 +341,7 @@ if sc_old_mean is not None:
         f"SC moyenne - >=55 (n={len(sc_old_mats)})",
         vmin=sc_vmin,
         vmax=sc_vmax,
-        cmap="viridis"
+        cmap="turbo"
     )
 else:
     axes[1, 1].set_title("SC moyenne - >=55 indisponible")
@@ -367,7 +367,7 @@ if fc_young_mean is not None and fc_old_mean is not None:
         "Différence FC : >=55 - <55",
         vmin=-vmax_fc_diff,
         vmax=vmax_fc_diff,
-        cmap="bwr"
+        cmap="turbo"
     )
 else:
     axes[0].set_title("Différence FC indisponible")
@@ -382,7 +382,7 @@ if sc_young_mean is not None and sc_old_mean is not None:
         "Différence SC : >=55 - <55",
         vmin=-vmax_sc_diff,
         vmax=vmax_sc_diff,
-        cmap="bwr"
+        cmap="turbo"
     )
 else:
     axes[1].set_title("Différence SC indisponible")
@@ -429,7 +429,7 @@ def get_module_boundaries(sorted_module_labels):
             boundaries.append(i - 0.5)
     return boundaries
 
-def plot_sorted_matrix(ax, mat, sorted_idx, sorted_module_labels, title, vmin=None, vmax=None, cmap="viridis"):
+def plot_sorted_matrix(ax, mat, sorted_idx, sorted_module_labels, title, vmin=None, vmax=None, cmap="turbo"):
     mat_sorted = mat[np.ix_(sorted_idx, sorted_idx)]
 
     im = ax.imshow(mat_sorted, cmap=cmap, vmin=vmin, vmax=vmax)
@@ -584,28 +584,28 @@ fig, axes = plt.subplots(2, 2, figsize=(14, 12))
 if fc_young_mean is not None:
     plot_sorted_matrix(axes[0, 0], fc_young_mean, sorted_idx, sorted_module_labels,
                        f"FC moyenne - <55 triée par module (n={len(fc_young_mats)})",
-                       vmin=fc_vmin_sorted, vmax=fc_vmax_sorted, cmap="coolwarm")
+                       vmin=fc_vmin_sorted, vmax=fc_vmax_sorted, cmap="turbo")
 else:
     axes[0, 0].axis("off")
 
 if fc_old_mean is not None:
     plot_sorted_matrix(axes[0, 1], fc_old_mean, sorted_idx, sorted_module_labels,
                        f"FC moyenne - >=55 triée par module (n={len(fc_old_mats)})",
-                       vmin=fc_vmin_sorted, vmax=fc_vmax_sorted, cmap="coolwarm")
+                       vmin=fc_vmin_sorted, vmax=fc_vmax_sorted, cmap="turbo")
 else:
     axes[0, 1].axis("off")
 
 if sc_young_mean is not None:
     plot_sorted_matrix(axes[1, 0], sc_young_mean, sorted_idx, sorted_module_labels,
                        f"SC moyenne - <55 triée par module (n={len(sc_young_mats)})",
-                       vmin=sc_vmin_sorted, vmax=sc_vmax_sorted, cmap="viridis")
+                       vmin=sc_vmin_sorted, vmax=sc_vmax_sorted, cmap="turbo")
 else:
     axes[1, 0].axis("off")
 
 if sc_old_mean is not None:
     plot_sorted_matrix(axes[1, 1], sc_old_mean, sorted_idx, sorted_module_labels,
                        f"SC moyenne - >=55 triée par module (n={len(sc_old_mats)})",
-                       vmin=sc_vmin_sorted, vmax=sc_vmax_sorted, cmap="viridis")
+                       vmin=sc_vmin_sorted, vmax=sc_vmax_sorted, cmap="turbo")
 else:
     axes[1, 1].axis("off")
 
@@ -621,7 +621,7 @@ if fc_diff is not None:
     vmax_fc_diff = np.max(np.abs(fc_diff))
     plot_sorted_matrix(axes[0], fc_diff, sorted_idx, sorted_module_labels,
                        "Différence FC : >=55 - <55 (triée par module)",
-                       vmin=-vmax_fc_diff, vmax=vmax_fc_diff, cmap="bwr")
+                       vmin=-vmax_fc_diff, vmax=vmax_fc_diff, cmap="turbo")
 else:
     axes[0].axis("off")
 
@@ -629,7 +629,7 @@ if sc_diff is not None:
     vmax_sc_diff = np.max(np.abs(sc_diff))
     plot_sorted_matrix(axes[1], sc_diff, sorted_idx, sorted_module_labels,
                        "Différence SC : >=55 - <55 (triée par module)",
-                       vmin=-vmax_sc_diff, vmax=vmax_sc_diff, cmap="bwr")
+                       vmin=-vmax_sc_diff, vmax=vmax_sc_diff, cmap="turbo")
 else:
     axes[1].axis("off")
 

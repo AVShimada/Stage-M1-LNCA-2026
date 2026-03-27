@@ -1,0 +1,5 @@
+dataset,n_nodes,n_modules,n_non_hub,n_provincial_hub,n_connector_hub
+FC_<55,100,5,75,0,25
+FC_>=55,100,6,83,0,17
+SC_<55,100,7,82,0,18
+SC_>=55,100,7,82,0,18
