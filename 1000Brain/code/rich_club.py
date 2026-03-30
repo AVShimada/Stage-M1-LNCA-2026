@@ -20,9 +20,6 @@ output_dir.mkdir(parents=True, exist_ok=True)
 fc_young_file = input_dir / "FC_mean_young_lt55.npy"
 fc_old_file   = input_dir / "FC_mean_old_ge55.npy"
 
-sc_young_file = input_dir / "SC_mean_young_lt55.npy"
-sc_old_file   = input_dir / "SC_mean_old_ge55.npy"
-
 # Paramètres null models
 gamma_null = 10
 n_rand = 100
@@ -44,14 +41,6 @@ def prepare_fc_for_rich_club(mat, positive_only=True):
     mat = clean_matrix(mat)
     if positive_only:
         mat[mat < 0] = 0.0
-    return mat
-
-
-def prepare_sc_for_rich_club(mat):
-    mat = clean_matrix(mat)
-    mat[mat < 0] = 0.0
-    mat = np.log(mat + 1.0)
-    np.fill_diagonal(mat, 0.0)
     return mat
 
 
@@ -136,24 +125,18 @@ def plot_rich_club_two_groups(df_young, df_old, title, save_path=None, label_you
 # =========================================================
 # 3. CHARGEMENT DES MATRICES
 # =========================================================
-for f in [fc_young_file, fc_old_file, sc_young_file, sc_old_file]:
+for f in [fc_young_file, fc_old_file]:
     if not f.exists():
         raise FileNotFoundError(f"Fichier introuvable : {f}")
 
 fc_young = np.load(fc_young_file)
 fc_old   = np.load(fc_old_file)
 
-sc_young = np.load(sc_young_file)
-sc_old   = np.load(sc_old_file)
-
 # =========================================================
 # 4. PRÉPARATION DES MATRICES
 # =========================================================
 fc_young_w = prepare_fc_for_rich_club(fc_young, positive_only=use_positive_fc_only)
 fc_old_w   = prepare_fc_for_rich_club(fc_old, positive_only=use_positive_fc_only)
-
-sc_young_w = prepare_sc_for_rich_club(sc_young)
-sc_old_w   = prepare_sc_for_rich_club(sc_old)
 
 # =========================================================
 # 5. CALCUL RICH CLUB FC
@@ -176,26 +159,6 @@ fc_young_rc.to_csv(output_dir / "FC_young_rich_club_weighted_normalized.csv", in
 fc_old_rc.to_csv(output_dir / "FC_old_rich_club_weighted_normalized.csv", index=False)
 
 # =========================================================
-# 6. CALCUL RICH CLUB SC
-# =========================================================
-print("Calcul rich club pondéré normalisé - SC <55 ...")
-sc_young_rc = compute_weighted_rich_club_normalized(
-    sc_young_w,
-    gamma_null=gamma_null,
-    n_rand=n_rand
-)
-
-print("Calcul rich club pondéré normalisé - SC >=55 ...")
-sc_old_rc = compute_weighted_rich_club_normalized(
-    sc_old_w,
-    gamma_null=gamma_null,
-    n_rand=n_rand
-)
-
-sc_young_rc.to_csv(output_dir / "SC_young_rich_club_weighted_normalized.csv", index=False)
-sc_old_rc.to_csv(output_dir / "SC_old_rich_club_weighted_normalized.csv", index=False)
-
-# =========================================================
 # 7. FIGURES
 # =========================================================
 plot_rich_club_two_groups(
@@ -203,13 +166,6 @@ plot_rich_club_two_groups(
     fc_old_rc,
     title="Rich Club pondéré normalisé par groupe d'âge - FC",
     save_path=output_dir / "FC_rich_club_weighted_normalized.png"
-)
-
-plot_rich_club_two_groups(
-    sc_young_rc,
-    sc_old_rc,
-    title="Rich Club pondéré normalisé par groupe d'âge - SC",
-    save_path=output_dir / "SC_rich_club_weighted_normalized.png"
 )
 
 # =========================================================
@@ -227,18 +183,6 @@ summary_df = pd.DataFrame([
         "n_nodes": fc_old.shape[0],
         "max_phi_norm": np.nanmax(fc_old_rc["phi_norm"].values),
         "k_at_max": fc_old_rc.loc[fc_old_rc["phi_norm"].idxmax(), "k"]
-    },
-    {
-        "dataset": "SC_<55",
-        "n_nodes": sc_young.shape[0],
-        "max_phi_norm": np.nanmax(sc_young_rc["phi_norm"].values),
-        "k_at_max": sc_young_rc.loc[sc_young_rc["phi_norm"].idxmax(), "k"]
-    },
-    {
-        "dataset": "SC_>=55",
-        "n_nodes": sc_old.shape[0],
-        "max_phi_norm": np.nanmax(sc_old_rc["phi_norm"].values),
-        "k_at_max": sc_old_rc.loc[sc_old_rc["phi_norm"].idxmax(), "k"]
     }
 ])
 
