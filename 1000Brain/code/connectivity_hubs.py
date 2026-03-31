@@ -17,6 +17,10 @@ output_dir = Path(
 )
 output_dir.mkdir(parents=True, exist_ok=True)
 
+coords_csv = Path(
+    r"C:\Users\aure6\Downloads\Stage_M1_Github\Stage-M1-LNCA-2026\1000Brain\atlas_coordinates\Schaefer_100_7Networks_coordinates.csv"
+)
+
 fc_young = np.load(input_matrix_dir / "FC_mean_young_lt55.npy")
 fc_old   = np.load(input_matrix_dir / "FC_mean_old_ge55.npy")
 
@@ -31,6 +35,22 @@ consensus_threshold = 0.5
 z_threshold = 1.0
 pc_threshold = 0.30
 top_n = 10
+
+# =========================================================
+# 1bis. CHARGER LES LABELS DE RÉGIONS DEPUIS LE CSV
+# =========================================================
+coords_df = pd.read_csv(coords_csv)
+
+if "label" not in coords_df.columns:
+    raise ValueError(f"Colonne 'label' absente dans {coords_csv}")
+
+region_labels = coords_df["label"].astype(str).tolist()
+
+if len(region_labels) != fc_young.shape[0]:
+    raise ValueError(
+        f"Nombre de labels ({len(region_labels)}) différent du nombre de nœuds "
+        f"dans les matrices ({fc_young.shape[0]})."
+    )
 
 # =========================================================
 # 2. FONCTIONS CONSENSUS
@@ -51,7 +71,6 @@ def clean_matrix(mat, modality="FC"):
 def louvain_one_run(mat, resolution=1.0):
     G = nx.from_numpy_array(mat)
     partition = community_louvain.best_partition(G, weight="weight", resolution=resolution)
-
     return np.array([partition[i] for i in range(len(mat))])
 
 
@@ -70,6 +89,7 @@ def agreement_matrix(partitions):
 
 
 def consensus_partition(A, threshold=0.5):
+    A = A.copy()
     A[A < threshold] = 0
     np.fill_diagonal(A, 0)
 
@@ -94,7 +114,10 @@ def compute_strength(mat):
 
 
 def zscore(x):
-    return (x - np.mean(x)) / np.std(x)
+    std = np.std(x)
+    if std == 0:
+        return np.zeros_like(x)
+    return (x - np.mean(x)) / std
 
 
 def participation_coefficient(mat, labels):
@@ -116,20 +139,22 @@ def participation_coefficient(mat, labels):
     return pc
 
 
-def compute_hubs(mat, labels):
+def compute_hubs(mat, labels, region_labels):
     strength = compute_strength(mat)
     z = zscore(strength)
     pc = participation_coefficient(mat, labels)
 
     return pd.DataFrame({
         "node_index": np.arange(len(mat)),
+        "region_name": region_labels,
+        "module_label": labels,
         "strength": strength,
         "strength_z": z,
         "participation_coefficient": pc
     })
 
 # =========================================================
-# 4. FIGURES HUBS (SEULEMENT CELLES-CI)
+# 4. FIGURES HUBS
 # =========================================================
 def plot_top_hubs(df1, df2, metric, title, color, save_path):
     def top(df):
@@ -139,18 +164,22 @@ def plot_top_hubs(df1, df2, metric, title, color, save_path):
     d2 = top(df2)
 
     plt.style.use("dark_background")
-    fig, axes = plt.subplots(1, 2, figsize=(14, 7))
+    fig, axes = plt.subplots(1, 2, figsize=(16, 8))
 
-    axes[0].barh(d1["node_index"].astype(str), d1[metric], color=color)
+    axes[0].barh(d1["region_name"], d1[metric], color=color)
     axes[0].set_title("<55")
+    axes[0].set_xlabel(metric)
+    axes[0].tick_params(axis="y", labelsize=8)
 
-    axes[1].barh(d2["node_index"].astype(str), d2[metric], color=color)
+    axes[1].barh(d2["region_name"], d2[metric], color=color)
     axes[1].set_title(">=55")
+    axes[1].set_xlabel(metric)
+    axes[1].tick_params(axis="y", labelsize=8)
 
     fig.suptitle(title, fontsize=16)
     plt.tight_layout()
 
-    plt.savefig(save_path, dpi=300)
+    plt.savefig(save_path, dpi=300, bbox_inches="tight")
     plt.show()
     plt.close()
 
@@ -166,14 +195,47 @@ sc_old_mat, sc_old_labels = compute_consensus(sc_old, "SC", resolution_sc)
 # =========================================================
 # 6. CALCUL HUBS
 # =========================================================
-fc_young_df = compute_hubs(fc_young_mat, fc_young_labels)
-fc_old_df   = compute_hubs(fc_old_mat, fc_old_labels)
+fc_young_df = compute_hubs(fc_young_mat, fc_young_labels, region_labels)
+fc_old_df   = compute_hubs(fc_old_mat, fc_old_labels, region_labels)
 
-sc_young_df = compute_hubs(sc_young_mat, sc_young_labels)
-sc_old_df   = compute_hubs(sc_old_mat, sc_old_labels)
+sc_young_df = compute_hubs(sc_young_mat, sc_young_labels, region_labels)
+sc_old_df   = compute_hubs(sc_old_mat, sc_old_labels, region_labels)
+
+# sauvegarde complète
+fc_young_df.to_csv(output_dir / "fc_young_hubs_with_labels.csv", index=False)
+fc_old_df.to_csv(output_dir / "fc_old_hubs_with_labels.csv", index=False)
+sc_young_df.to_csv(output_dir / "sc_young_hubs_with_labels.csv", index=False)
+sc_old_df.to_csv(output_dir / "sc_old_hubs_with_labels.csv", index=False)
+
+# top 10 sauvegardés
+fc_young_df.sort_values("strength", ascending=False).head(top_n).to_csv(
+    output_dir / "fc_young_top10_strength.csv", index=False
+)
+fc_old_df.sort_values("strength", ascending=False).head(top_n).to_csv(
+    output_dir / "fc_old_top10_strength.csv", index=False
+)
+fc_young_df.sort_values("participation_coefficient", ascending=False).head(top_n).to_csv(
+    output_dir / "fc_young_top10_pc.csv", index=False
+)
+fc_old_df.sort_values("participation_coefficient", ascending=False).head(top_n).to_csv(
+    output_dir / "fc_old_top10_pc.csv", index=False
+)
+
+sc_young_df.sort_values("strength", ascending=False).head(top_n).to_csv(
+    output_dir / "sc_young_top10_strength.csv", index=False
+)
+sc_old_df.sort_values("strength", ascending=False).head(top_n).to_csv(
+    output_dir / "sc_old_top10_strength.csv", index=False
+)
+sc_young_df.sort_values("participation_coefficient", ascending=False).head(top_n).to_csv(
+    output_dir / "sc_young_top10_pc.csv", index=False
+)
+sc_old_df.sort_values("participation_coefficient", ascending=False).head(top_n).to_csv(
+    output_dir / "sc_old_top10_pc.csv", index=False
+)
 
 # =========================================================
-# 7. FIGURES (SEULEMENT CELLES QUE TU VEUX)
+# 7. FIGURES
 # =========================================================
 
 # FC strength
@@ -216,4 +278,4 @@ plot_top_hubs(
     save_path=output_dir / "SC_pc.png"
 )
 
-print("Terminé : uniquement les figures de hubs ont été générées.")
+print("Terminé : figures et tableaux de hubs générés avec les noms de régions depuis le CSV.")
