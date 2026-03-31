@@ -1,0 +1,2 @@
+session,atlas_folder,ts_suffix,TR,window,lag,expected_ts_length,common_n_windows_used,n_subjects_total,n_subjects_young,n_subjects_middle,n_subjects_old,age_q0,age_q1_3,age_q2_3,age_q1,mean_compute_time_per_subject_sec,total_compute_time_sec
+ses-1,Schaefer_100_7NW,_ses-1_FC_TS_Schaefer_100P_7NW_V1.txt,2,10,1,296,287,1166,390,389,387,18.5,58.6,68.1,85.4,0.2791021664688399,325.4331261026673

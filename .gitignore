@@ -1,2 +1,4 @@
+MC*.npy
 *.fig
 workspace.mat
+MC*.csv

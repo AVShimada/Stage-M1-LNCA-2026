@@ -1,0 +1,2 @@
+session,atlas,TR,window,lag,min_n_windows_required,common_n_windows_used,common_ts_length_used,n_subjects_total_after_filter,n_subjects_young,n_subjects_middle,n_subjects_old,mean_compute_time_per_subject_sec,total_compute_time_sec
+ses-1,100,2,10,1,280,280,289,422,162,129,131,0.279761903554861,118.05952330015134
