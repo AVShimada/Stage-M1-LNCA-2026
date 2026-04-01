@@ -4,6 +4,7 @@ import matplotlib.pyplot as plt
 from pathlib import Path
 import time
 import gc
+import random
 
 # =========================================================
 # PARAMÈTRES
@@ -15,21 +16,21 @@ MERGED_CSV = Path(
 )
 
 OUTPUT_DIR = Path(
-    r"C:\Users\aure6\Downloads\Stage_M1_Github\Stage-M1-LNCA-2026\1000Brain\resultats_dFC_matlab_like"
+    r"C:\Users\aure6\Downloads\Stage_M1_Github\Stage-M1-LNCA-2026\1000Brain\resultats_dFC_random_subjects"
 )
 OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 
-ATLAS = "100"
 SESSION = "ses-1"
 
 TR = 2
 WINDOW = 10
 LAG = 1
 
-DEBUG = False
-DEBUG_N_SUBJECTS = 20
+COMMON_TS_LENGTH = 290
 
 DTYPE = np.float32
+RANDOM_SEED = 42
+random.seed(RANDOM_SEED)
 
 # =========================================================
 # FONCTIONS
@@ -53,7 +54,6 @@ def ts_to_dfc_stream(TS, W, lag):
     l = n * (n - 1) // 2
 
     kmax = ((t - W) // lag) + 1
-
     dFCstream = np.zeros((l, kmax), dtype=DTYPE)
 
     wstart = 0
@@ -61,7 +61,6 @@ def ts_to_dfc_stream(TS, W, lag):
     while (wstart + W) <= t:
         window_ts = TS[wstart:wstart + W, :]
         dFCstream[:, k] = ts_to_fc(window_ts, "1D")
-
         wstart += lag
         k += 1
 
@@ -85,16 +84,13 @@ df["Age"] = pd.to_numeric(df["Age"], errors="coerce")
 
 df = df.dropna(subset=["id", "Age"])
 
+# 3 groupes équilibrés
 df["age_group"] = pd.qcut(df["Age"], 3, labels=["Young", "Middle", "Old"])
 
 df = df[df["FC_ses1"] == "YES"]
 
-if DEBUG:
-    df = df.head(DEBUG_N_SUBJECTS)
-
 print("Nombre de sujets :", len(df))
 print(df["age_group"].value_counts())
-
 
 # =========================================================
 # CHARGEMENT TS
@@ -129,98 +125,113 @@ for _, row in df.iterrows():
         if TS.shape[0] < TS.shape[1]:
             TS = TS.T
 
-        subjects.append({
-            "id": sid,
-            "age": row["Age"],
-            "group": row["age_group"],
-            "TS": TS
-        })
+        if TS.shape[0] >= COMMON_TS_LENGTH:
+            TS = TS[:COMMON_TS_LENGTH]
 
-    except:
+            subjects.append({
+                "id": sid,
+                "age": row["Age"],
+                "group": str(row["age_group"]),
+                "TS": TS
+            })
+
+    except Exception:
         continue
 
 print("Sujets chargés :", len(subjects))
 
 # =========================================================
-# FIXER LONGUEUR COMMUNE
+# SÉLECTION ALÉATOIRE (3 sujets par groupe)
 # =========================================================
-COMMON_TS_LENGTH = 290  # ajuste si besoin
+groups = ["Young", "Middle", "Old"]
+N_PER_GROUP = 3
 
-subjects_fixed = []
+selected_subjects = {}
 
-for sub in subjects:
-    if sub["TS"].shape[0] >= COMMON_TS_LENGTH:
-        sub["TS"] = sub["TS"][:COMMON_TS_LENGTH, :]
-        subjects_fixed.append(sub)
+for g in groups:
+    subs = [s for s in subjects if s["group"] == g]
 
-subjects = subjects_fixed
+    if len(subs) >= N_PER_GROUP:
+        selected_subjects[g] = random.sample(subs, N_PER_GROUP)
+    elif len(subs) > 0:
+        selected_subjects[g] = subs
+    else:
+        selected_subjects[g] = []
 
-print("Sujets après homogénéisation :", len(subjects))
+print("\nSujets sélectionnés :")
+for g in groups:
+    ids = [f"sub-{s['id']}" for s in selected_subjects[g]]
+    print(f"{g} -> {ids}")
 
 # =========================================================
 # CALCUL dFC
 # =========================================================
-group_sums = {"Young": None, "Middle": None, "Old": None}
-group_counts = {"Young": 0, "Middle": 0, "Old": 0}
+results = {g: [] for g in groups}
 
-times = []
+for g in groups:
+    for sub in selected_subjects[g]:
+        TS = sub["TS"]
 
-for sub in subjects:
-    TS = sub["TS"]
+        t0 = time.perf_counter()
 
-    t0 = time.perf_counter()
+        dFCstream = ts_to_dfc_stream(TS, WINDOW, LAG)
+        dFC = dfc_stream_to_dfc(dFCstream)
 
-    dFCstream = ts_to_dfc_stream(TS, WINDOW, LAG)
-    dFC = dfc_stream_to_dfc(dFCstream)
+        dt = time.perf_counter() - t0
 
-    dt = time.perf_counter() - t0
-    times.append(dt)
+        print(f"{g} | sub-{sub['id']} | fenêtres={dFC.shape[0]} | temps={dt:.3f}s")
 
-    g = sub["group"]
+        results[g].append({
+            "id": sub["id"],
+            "mat": dFC
+        })
 
-    if group_sums[g] is None:
-        group_sums[g] = dFC.copy()
-    else:
-        group_sums[g] += dFC
-
-    group_counts[g] += 1
-
-    print(f"Sujet {sub['id']} | fenêtres={dFC.shape[0]} | temps={dt:.3f}s")
-
-    del dFCstream, dFC
-    gc.collect()
-
-print("\nTemps moyen :", np.mean(times))
-
+        del dFCstream
+        gc.collect()
 
 # =========================================================
-# MOYENNES
-# =========================================================
-results = {}
-
-for g in group_sums:
-    if group_counts[g] > 0:
-        results[g] = group_sums[g] / group_counts[g]
-
-
-# =========================================================
-# PLOTS
+# 3 FIGURES SÉPARÉES
 # =========================================================
 plt.style.use("dark_background")
 
-fig, axes = plt.subplots(1, 3, figsize=(18, 6))
+for g in groups:
+    if len(results[g]) == 0:
+        continue
 
-for ax, g in zip(axes, ["Young", "Middle", "Old"]):
-    if g in results:
-        mat = results[g]
-        im = ax.imshow(mat, cmap="turbo", vmin=0, vmax=1)
-        ax.set_title(f"{g} (n={group_counts[g]})")
-        ax.set_aspect("equal")
-        plt.colorbar(im, ax=ax)
-    else:
-        ax.axis("off")
+    fig, axes = plt.subplots(1, N_PER_GROUP, figsize=(5 * N_PER_GROUP, 5))
 
-plt.suptitle("FCD (Matlab-like, lag=W)", fontsize=16)
-plt.tight_layout()
-plt.savefig(OUTPUT_DIR / "mean_FCD_matlab_like.png", dpi=300)
-plt.show()
+    if N_PER_GROUP == 1:
+        axes = [axes]
+
+    last_im = None
+
+    for i in range(N_PER_GROUP):
+        ax = axes[i]
+
+        if i < len(results[g]):
+            mat = results[g][i]["mat"]
+            sid = results[g][i]["id"]
+
+            last_im = ax.imshow(mat, cmap="turbo", vmin=0, vmax=0.5)
+            ax.set_title(f"{g}\nsub-{sid}", fontsize=11)
+            ax.set_xlabel("Time windows")
+            ax.set_ylabel("Time windows")
+            ax.set_aspect("equal")
+        else:
+            ax.axis("off")
+
+    if last_im is not None:
+        # créer un axe dédié pour la colorbar à droite
+        cbar_ax = fig.add_axes([0.92, 0.15, 0.02, 0.7])  # [left, bottom, width, height]
+
+        cbar = fig.colorbar(last_im, cax=cbar_ax)
+        cbar.set_label("Correlation")
+
+    plt.suptitle(f"FCD - 3 sujets aléatoires du groupe {g}", fontsize=16)
+    plt.subplots_adjust(wspace=0.2, hspace=0.2, top=0.88)
+
+    plt.savefig(OUTPUT_DIR / f"random_3subjects_{g}_FCD.png", dpi=300, bbox_inches="tight")
+    plt.show()
+    plt.close()
+
+print(f"\nFigures enregistrées dans : {OUTPUT_DIR}")

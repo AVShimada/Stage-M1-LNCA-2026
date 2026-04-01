@@ -1,0 +1,26 @@
+                              OLS Regression Results                              
+==================================================================================
+Dep. Variable:     global_cognition_score   R-squared:                       0.491
+Model:                                OLS   Adj. R-squared:                  0.491
+Method:                     Least Squares   F-statistic:                     630.1
+Date:                    Wed, 01 Apr 2026   Prob (F-statistic):          2.98e-192
+Time:                            10:35:34   Log-Likelihood:                -769.76
+No. Observations:                    1308   AIC:                             1546.
+Df Residuals:                        1305   BIC:                             1561.
+Df Model:                               2                                         
+Covariance Type:                nonrobust                                         
+==============================================================================
+                 coef    std err          t      P>|t|      [0.025      0.975]
+------------------------------------------------------------------------------
+const          0.8602      0.081     10.674      0.000       0.702       1.018
+ISCED_97       0.0986      0.006     15.240      0.000       0.086       0.111
+Age           -0.0251      0.001    -26.995      0.000      -0.027      -0.023
+==============================================================================
+Omnibus:                      183.469   Durbin-Watson:                   1.949
+Prob(Omnibus):                  0.000   Jarque-Bera (JB):              609.771
+Skew:                          -0.679   Prob(JB):                    3.89e-133
+Kurtosis:                       6.057   Cond. No.                         418.
+==============================================================================
+
+Notes:
+[1] Standard Errors assume that the covariance matrix of the errors is correctly specified.

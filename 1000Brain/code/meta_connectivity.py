@@ -525,8 +525,7 @@ fig, axes = plt.subplots(1, 3, figsize=(18, 6))
 
 for ax, (title, mat, n_sub) in zip(axes, group_mats):
     if mat is not None:
-        vmax = np.nanpercentile(mat, 99)
-        im = ax.imshow(mat, cmap="turbo", vmin=0, vmax=vmax)
+        im = ax.imshow(mat, cmap="turbo", vmin=0, vmax=0.1)
         ax.set_title(f"{title} (n={n_sub})")
         ax.set_xlabel("Connections")
         ax.set_ylabel("Connections")
@@ -536,7 +535,7 @@ for ax, (title, mat, n_sub) in zip(axes, group_mats):
         ax.set_title(f"{title} indisponible")
         ax.axis("off")
 
-plt.suptitle("Mean meta-connectivity by age tertiles (refined cohort, Matlab-like MC)", fontsize=16)
+plt.suptitle("Mean meta-connectivity by age tertiles (vmax=0.1)", fontsize=16)
 plt.tight_layout(rect=[0, 0, 1, 0.95])
 plt.savefig(OUTPUT_DIR / "mean_MC_three_age_groups_refined_matlab_like.png", dpi=300, bbox_inches="tight")
 plt.show()
